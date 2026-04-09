@@ -10,3 +10,10 @@ updates:
   directory: "/"
   schedule:
     interval: "weekly"
+  ignore:
+    # amqtt 0.11.x has a packaging bug: different sub-releases pin either
+    # pyyaml==6.0.2 or pyyaml==6.0.3, making the constraints unsatisfiable
+    # when Dependabot resolves across all Python versions in the >=3.12 range.
+    # amqtt is a dev-only MQTT broker dependency; the pinned version in uv.lock
+    # is correct and does not need automated updates.
+    - dependency-name: amqtt
