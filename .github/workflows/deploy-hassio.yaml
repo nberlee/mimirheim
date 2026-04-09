@@ -36,8 +36,6 @@ jobs:
           external_repository: jsimonetti/hassio-apps
           publish_branch: main
           publish_dir: ./hassio-repository
-          # keep_files: false replaces the entire target branch with the
-          # contents of hassio-repository/ on each push. This ensures that
-          # deletions in the source are always reflected in the deployed repo.
           keep_files: true
-          force_orphan: false
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
