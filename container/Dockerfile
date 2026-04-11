@@ -46,6 +46,8 @@ ARG PYTHON_VERSION=3.12
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
 
+RUN apt-get update && apt-get install -y --no-install-recommends binutils && rm -rf /var/lib/apt/lists/*
+
 # Install uv — fast dependency installer.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -64,8 +66,12 @@ COPY mimirheim/ ./mimirheim/
 COPY mimirheim_helpers/ ./mimirheim_helpers/
 
 RUN UV_PROJECT_ENVIRONMENT=/app/.venv uv sync --all-extras --frozen --no-editable && \
-    find /app/.venv -type d \( -name "tests" -o -name "test" \) -prune -exec rm -rf '{}' + && \
-    /app/.venv/bin/python -m compileall -q /app/.venv
+    find /app/.venv -type d \( -name "tests" -o -name "test" -o -name "*.dist-info" \) -prune -exec rm -rf '{}' + && \
+    /app/.venv/bin/python -m compileall -q -b /app/.venv && \
+    find /app/.venv -type f \( -name "*.py" -o -name "*.pyi" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \) -delete && \
+    find /app/.venv/lib/python*/site-packages/ -type f -executable -exec strip --strip-unneeded '{}' + || true
+
+
 # ---------------------------------------------------------------------------
 # Stage 2: final image
 # ---------------------------------------------------------------------------
