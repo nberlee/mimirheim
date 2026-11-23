@@ -9,6 +9,8 @@ The default initial temperature is 45.0°C.
 """
 
 
+import pytest
+
 from mimirheim.config.schema import ThermalBoilerConfig
 from mimirheim.core.bundle import ThermalBoilerInputs
 from mimirheim.core.context import ModelContext
@@ -379,3 +381,13 @@ def test_boiler_terminal_value_prevents_unnecessary_drain() -> None:
     assert not isinstance(terminal, (int, float)), (
         "terminal_soc_var() must return a solver expression, not a plain number"
     )
+
+
+def test_standby_loss_tanks_are_refused_until_supported() -> None:
+    """A standby-loss tank is refused, not built without any loss."""
+    cfg = ThermalBoilerConfig(
+        volume_liters=200.0, elec_power_kw=3.0, setpoint_c=55.0, min_temp_c=40.0,
+        standby_loss_w=90.0, ambient_temp_c=18.0,
+    )
+    with pytest.raises(NotImplementedError):
+        ThermalBoilerDevice(name="boiler", config=cfg)

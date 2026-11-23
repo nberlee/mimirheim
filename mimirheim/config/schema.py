@@ -2518,6 +2518,11 @@ class ThermalBoilerInputsConfig(BaseModel):
         ),
     )
 
+# Tank-to-room temperature difference at which the ErP / EN 12897 standing
+# loss "S" of a hot water tank is measured, in K.
+_STANDBY_LOSS_REFERENCE_DELTA_K: float = 45.0
+
+
 class ThermalBoilerConfig(BaseModel):
     """Configuration for a thermal boiler: electric immersion heater or heat pump DHW.
 
@@ -2541,9 +2546,21 @@ class ThermalBoilerConfig(BaseModel):
         min_temp_c: Minimum allowable water temperature in degrees Celsius. The
             solver heats the tank to avoid falling below this level. For legionella
             prevention, 45°C is the recommended lower bound.
-        cooling_rate_k_per_hour: Rate at which the tank temperature falls in
-            K/hour when the heater is off. Combines standby heat loss through tank
-            insulation and expected hot water draws from the household.
+        cooling_rate_k_per_hour: Legacy loss mode. Rate at which the tank
+            temperature falls in K/hour when the heater is off. Combines standby
+            heat loss through tank insulation and expected hot water draws from
+            the household. Exclusive with the standby loss mode.
+        standby_loss_w: Standby loss mode. The tank's standing loss in W as
+            given on its datasheet or energy label (ErP / EN 12897 value "S",
+            measured at a 45 K difference between tank and room). Exactly one
+            of this and ``standby_loss_kw_per_k`` is required in this mode.
+        standby_loss_kw_per_k: Standby loss mode. Heat loss in kW per kelvin
+            of tank-to-room temperature difference.
+        ambient_temp_c: Standby loss mode. Temperature of the room around the
+            tank in °C.
+        use_draw_forecast: Standby loss mode only. When True, mimirheim reads a
+            timestamped hot water draw forecast and subtracts the forecast draw
+            per step instead of folding draws into a constant cooling rate.
         min_run_steps: Minimum number of consecutive 15-minute steps the heater
             must remain on once started. Use 0 or 1 for resistive elements (free
             cycling). Use 4 (one hour) for heat pump compressors to avoid
@@ -2572,9 +2589,34 @@ class ThermalBoilerConfig(BaseModel):
     min_temp_c: float = Field(
         default=40.0, description="Minimum allowable water temperature in °C.",
     )
-    cooling_rate_k_per_hour: float = Field(
+    cooling_rate_k_per_hour: float | None = Field(
+        default=None,
         ge=0,
-        description="Tank temperature decay rate in K/hour when the heater is off.",
+        description=(
+            "Tank temperature decay rate in K/hour when the heater is off (legacy loss mode). "
+            "Exclusive with the standby loss fields."
+        ),
+    )
+    standby_loss_w: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        description="Standing loss in W from the datasheet or energy label (ErP 'S', at a 45 K tank-to-room difference).",
+    )
+    standby_loss_kw_per_k: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        description="Heat loss in kW per K of tank-to-room difference. Alternative to standby_loss_w.",
+    )
+    ambient_temp_c: float | None = Field(
+        default=None,
+        allow_inf_nan=False,
+        description="Temperature of the room around the tank in °C (standby loss mode).",
+    )
+    use_draw_forecast: bool = Field(
+        default=False,
+        description="Subtract a timestamped hot water draw forecast per step (standby loss mode only).",
     )
     min_run_steps: int = Field(
         ge=0,
@@ -2596,6 +2638,50 @@ class ThermalBoilerConfig(BaseModel):
         default_factory=ThermalBoilerInputsConfig,
         description="MQTT input topic configuration for live water temperature readings. Defaults to an empty model so topics are derived. Set to null to opt out of MQTT temperature input entirely.",
     )
+
+    def standby_loss_kw_per_k_value(self) -> float | None:
+        """Heat loss in kW per K of tank-to-room difference, or None in legacy mode.
+
+        ``standby_loss_w`` is a datasheet value measured at a 45 K difference,
+        so it converts as ``W / 45 / 1000``.
+        """
+        if self.standby_loss_kw_per_k is not None:
+            return self.standby_loss_kw_per_k
+        if self.standby_loss_w is not None:
+            return self.standby_loss_w / _STANDBY_LOSS_REFERENCE_DELTA_K / 1000.0
+        return None
+
+    @model_validator(mode="after")
+    def _validate_loss_mode(self) -> "ThermalBoilerConfig":
+        """Require exactly one loss mode: legacy cooling rate, or standby loss.
+
+        Standby mode needs exactly one of ``standby_loss_w`` and
+        ``standby_loss_kw_per_k`` plus ``ambient_temp_c``. The draw forecast
+        is only meaningful with standby loss, because the legacy cooling rate
+        already includes typical draws.
+        """
+        standby_fields = [f for f in ("standby_loss_w", "standby_loss_kw_per_k") if getattr(self, f) is not None]
+        standby_mode = bool(standby_fields) or self.ambient_temp_c is not None
+        if self.cooling_rate_k_per_hour is not None and standby_mode:
+            raise ValueError(
+                "Choose one loss mode: cooling_rate_k_per_hour, or standby loss "
+                "(standby_loss_w or standby_loss_kw_per_k with ambient_temp_c)."
+            )
+        if self.cooling_rate_k_per_hour is None and not standby_mode:
+            raise ValueError(
+                "A loss mode is required: cooling_rate_k_per_hour, or standby loss "
+                "(standby_loss_w or standby_loss_kw_per_k with ambient_temp_c)."
+            )
+        if standby_mode:
+            if len(standby_fields) != 1:
+                raise ValueError("Standby loss mode needs exactly one of standby_loss_w and standby_loss_kw_per_k.")
+            if self.ambient_temp_c is None:
+                raise ValueError("Standby loss mode needs ambient_temp_c.")
+        if self.use_draw_forecast and not standby_mode:
+            raise ValueError(
+                "use_draw_forecast requires the standby loss mode; cooling_rate_k_per_hour already includes draws."
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_temp_range(self) -> "ThermalBoilerConfig":

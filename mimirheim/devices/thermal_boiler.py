@@ -53,6 +53,13 @@ class ThermalBoilerDevice:
             name: Device name, matching the key in ``MimirheimConfig.thermal_boilers``.
             config: Validated static configuration for this thermal boiler.
         """
+        if config.cooling_rate_k_per_hour is None:
+            # The standby loss dynamics are added in a later change of this
+            # feature; until then a tank configured with them is refused here
+            # rather than built without any loss.
+            raise NotImplementedError(
+                f"Thermal boiler {name!r}: the standby loss mode is not supported yet."
+            )
         self.name = name
         self.config = config
 

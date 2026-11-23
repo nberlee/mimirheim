@@ -3041,3 +3041,140 @@ def test_soc_ratchet_hold_bounds() -> None:
         SocRatchetConfig(enabled=True, hold_hours=-0.25)
     with pytest.raises(ValidationError):
         SocRatchetConfig(enabled=True, hold_hours=24.25)
+
+
+# ---------------------------------------------------------------------------
+# ThermalBoilerConfig loss modes (legacy cooling rate or standby loss)
+# ---------------------------------------------------------------------------
+
+
+def _standby_data(**overrides: object) -> dict:
+    data = _thermal_boiler_data(standby_loss_w=90.0, ambient_temp_c=18.0)
+    del data["cooling_rate_k_per_hour"]
+    data.update(overrides)
+    return {k: v for k, v in data.items() if v is not None}
+
+
+class TestThermalBoilerLossModes:
+    def test_legacy_cooling_rate_is_unchanged(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        cfg = ThermalBoilerConfig.model_validate(_thermal_boiler_data())
+        assert cfg.cooling_rate_k_per_hour == 2.0
+        assert cfg.standby_loss_kw_per_k_value() is None
+        assert cfg.use_draw_forecast is False
+
+    def test_datasheet_watts_convert_at_45_kelvin(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        cfg = ThermalBoilerConfig.model_validate(_standby_data())
+        assert cfg.cooling_rate_k_per_hour is None
+        assert cfg.standby_loss_kw_per_k_value() == pytest.approx(90.0 / 45.0 / 1000.0)
+
+    def test_kw_per_kelvin_is_used_as_is(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _standby_data(standby_loss_kw_per_k=0.0025)
+        del data["standby_loss_w"]
+        assert ThermalBoilerConfig.model_validate(data).standby_loss_kw_per_k_value() == 0.0025
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"standby_loss_kw_per_k": 0.002},  # both standby fields
+            {"ambient_temp_c": None},  # standby without ambient
+            {"cooling_rate_k_per_hour": 2.0},  # both modes
+        ],
+    )
+    def test_ambiguous_or_incomplete_standby_is_rejected(self, change: dict) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        with pytest.raises(ValidationError, match="loss"):
+            ThermalBoilerConfig.model_validate(_standby_data(**change))
+
+    def test_ambient_without_standby_loss_is_rejected(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _standby_data()
+        del data["standby_loss_w"]
+        with pytest.raises(ValidationError, match="exactly one of standby_loss_w and standby_loss_kw_per_k"):
+            ThermalBoilerConfig.model_validate(data)
+
+    def test_no_loss_mode_is_rejected(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _thermal_boiler_data()
+        del data["cooling_rate_k_per_hour"]
+        with pytest.raises(ValidationError, match="loss"):
+            ThermalBoilerConfig.model_validate(data)
+
+    def test_draw_forecast_requires_standby_mode(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        with pytest.raises(ValidationError, match="use_draw_forecast"):
+            ThermalBoilerConfig.model_validate(_thermal_boiler_data(use_draw_forecast=True))
+        assert ThermalBoilerConfig.model_validate(_standby_data(use_draw_forecast=True)).use_draw_forecast
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("standby_loss_w", 0.0),
+            ("standby_loss_w", -5.0),
+            ("standby_loss_w", float("inf")),
+            ("standby_loss_w", float("nan")),
+            ("ambient_temp_c", float("nan")),
+        ],
+    )
+    def test_standby_values_must_be_positive_and_finite(self, field: str, value: float) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(_standby_data(**{field: value}))
+
+    @pytest.mark.parametrize("value", [-0.001, 0.0, float("nan"), float("inf"), float("-inf")])
+    def test_kw_per_kelvin_must_be_positive_and_finite(self, value: float) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _standby_data(standby_loss_kw_per_k=value)
+        del data["standby_loss_w"]
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(data)
+
+    @pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+    def test_ambient_must_be_finite(self, value: float) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(_standby_data(ambient_temp_c=value))
+
+    @pytest.mark.parametrize("value", [0.0, -5.0])
+    def test_cold_rooms_are_accepted(self, value: float) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        assert ThermalBoilerConfig.model_validate(_standby_data(ambient_temp_c=value)).ambient_temp_c == value
+
+    def test_standby_config_round_trips(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        cfg = ThermalBoilerConfig.model_validate(_standby_data(use_draw_forecast=True))
+        assert ThermalBoilerConfig.model_validate(cfg.model_dump(mode="json", exclude_none=True)) == cfg
+
+    def test_editor_shows_the_fields_of_one_loss_mode(self) -> None:
+        from mimirheim.config.formspec import THERMAL_BOILER_CONFIG_FORM_SPEC
+        from mimirheim_shared.visibility import evaluate_condition
+
+        fields = THERMAL_BOILER_CONFIG_FORM_SPEC.fields
+        legacy = {"cooling_rate_k_per_hour": 2.0, "standby_loss_w": None, "standby_loss_kw_per_k": None,
+                  "ambient_temp_c": None}
+        standby = {"cooling_rate_k_per_hour": None, "standby_loss_w": 90.0, "standby_loss_kw_per_k": None,
+                   "ambient_temp_c": 18.0}
+        empty = {k: None for k in legacy}
+        cooling = fields["cooling_rate_k_per_hour"].visible_if
+        assert cooling is not None
+        assert evaluate_condition(cooling, legacy) and evaluate_condition(cooling, empty)
+        assert not evaluate_condition(cooling, standby)
+        for name in ("standby_loss_w", "standby_loss_kw_per_k", "ambient_temp_c", "use_draw_forecast"):
+            cond = fields[name].visible_if
+            assert cond is not None
+            assert evaluate_condition(cond, standby) and evaluate_condition(cond, empty)
+            assert not evaluate_condition(cond, legacy)

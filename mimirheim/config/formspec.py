@@ -23,7 +23,7 @@ under both space heating and combi heat pump) rather than re-authored per site.
 from __future__ import annotations
 
 from mimirheim_shared.formspec import FieldSpec, FormSpec, Tier
-from mimirheim_shared.visibility import Comparison, ComparisonOperator
+from mimirheim_shared.visibility import BooleanOperator, Comparison, ComparisonOperator, ConditionGroup
 
 # ---------------------------------------------------------------------------
 # Battery: leaf models
@@ -728,6 +728,19 @@ THERMAL_BOILER_INPUTS_FORM_SPEC = FormSpec(
     }
 )
 
+# Loss-mode visibility: the cooling rate shows until a standby field is set,
+# the standby fields show until a cooling rate is set. A config with neither
+# shows both, so the user can pick.
+_NO_STANDBY_LOSS = ConditionGroup(
+    operator=BooleanOperator.AND,
+    conditions=[
+        Comparison(field="standby_loss_w", operator=ComparisonOperator.EQ, value=None),
+        Comparison(field="standby_loss_kw_per_k", operator=ComparisonOperator.EQ, value=None),
+        Comparison(field="ambient_temp_c", operator=ComparisonOperator.EQ, value=None),
+    ],
+)
+_NO_COOLING_RATE = Comparison(field="cooling_rate_k_per_hour", operator=ComparisonOperator.EQ, value=None)
+
 THERMAL_BOILER_CONFIG_FORM_SPEC = FormSpec(
     fields={
         "volume_liters": FieldSpec(
@@ -753,8 +766,39 @@ THERMAL_BOILER_CONFIG_FORM_SPEC = FormSpec(
         ),
         "cooling_rate_k_per_hour": FieldSpec(
             label="Cooling rate (K/h)",
-            description="Tank temperature decay rate in K/hour when the heater is off.",
+            description=(
+                "Tank temperature decay rate in K/hour when the heater is off, draws included. "
+                "Leave empty to use the standby loss fields instead."
+            ),
             tier=Tier.BASIC,
+            visible_if=_NO_STANDBY_LOSS,
+        ),
+        "standby_loss_w": FieldSpec(
+            label="Standby loss (W)",
+            description=(
+                "Standing loss in W from the tank's datasheet or energy label (ErP 'S', at 45 K). "
+                "Set this or the kW/K value, not both."
+            ),
+            tier=Tier.BASIC,
+            visible_if=_NO_COOLING_RATE,
+        ),
+        "standby_loss_kw_per_k": FieldSpec(
+            label="Standby loss (kW/K)",
+            description="Heat loss in kW per K of tank-to-room difference. Alternative to the standby loss in W.",
+            tier=Tier.EXPERT,
+            visible_if=_NO_COOLING_RATE,
+        ),
+        "ambient_temp_c": FieldSpec(
+            label="Room temperature (°C)",
+            description="Temperature of the room around the tank in degrees C (standby loss mode).",
+            tier=Tier.BASIC,
+            visible_if=_NO_COOLING_RATE,
+        ),
+        "use_draw_forecast": FieldSpec(
+            label="Use hot water draw forecast",
+            description="Subtract a timestamped hot water draw forecast per step (standby loss mode only).",
+            tier=Tier.BASIC,
+            visible_if=_NO_COOLING_RATE,
         ),
         "min_run_steps": FieldSpec(
             label="Minimum run steps",
