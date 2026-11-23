@@ -224,7 +224,7 @@ One other component installs an objective and solves: `_probe_care_targets` in `
 Internally it branches on `bundle.strategy`:
 
 - **`minimize_cost`** — weighted objective dominated by `confidence[t] × (import_price[t] × import[t] − export_price[t] × export[t])`. Import and export penalties derived from `constraints` block are added.
-- **`minimize_consumption`** — lexicographic two-solve: first minimise total grid import (Phase 1), then minimise full net cost subject to the import bound found in Phase 1 (Phase 2). Phase 2 uses the same objective as `minimize_cost`, so export revenue and device wear are still optimised within the import constraint. If Phase 1 finds no solution there is no bound to lock and no variable values to read, so the lock is skipped, Phase 2 solves for cost alone, and `SolveResult.strategy_degraded` is set. The same flag is set when Phase 1 returns a time-limited incumbent: the lock is applied, but to an achievable volume rather than a proven minimum. Either way the schedule is published under the requested strategy name, and the flag is what says the strategy's guarantee was not delivered.
+- **`minimize_consumption`** — lexicographic two-solve: first minimise total grid import (Phase 1), then minimise full net cost subject to the import bound found in Phase 1 (Phase 2). Phase 2 uses the same objective as `minimize_cost`, so export revenue and device wear are still optimised within the import constraint. If Phase 1 finds no solution there is no bound to lock and no variable values to read, so the lock is skipped, Phase 2 solves for cost alone, and `SolveResult.strategy_degraded` is set. The same flag is set when Phase 1 returns a time-limited incumbent: the lock is applied, but to an achievable volume rather than a proven minimum. Either way the schedule is published under the requested strategy name, and the flag is what says the strategy's guarantee was not delivered. The flag is also set for any strategy by the floor-shortfall fallback of standby-loss thermal boilers (see "Soft tank floor"). Phase 1 and Phase 2 split the budget left after any preliminary solves.
 - **`balanced`** — weighted combination of cost and self-sufficiency terms using `balanced_weights` from config.
 
 All three modes add:
@@ -290,7 +290,17 @@ on[t+τ]  >= start[t]   for τ in 1..min_run_steps-1, where t+τ < horizon
 
 In standby mode the floor `min_temp_c` is soft, because a forecast hot water draw can exceed what the heater can supply in time (a long shower), and a hard floor would then make the whole solve infeasible, leaving every device without a plan. In practice the appliance also starts heating by itself during such a draw, so a brief dip below the floor is physical.
 
-`shortfall[t] >= 0` (K) measures the dip, and `T_tank[t]` has no fixed lower bound in this mode (a large draw can take the tank more than a few kelvin below the floor). `floor_shortfall_kh` returns `sum(shortfall[t] * dt)` in K·h. `build_and_solve` currently holds that total at zero, which is exactly the hard floor; legacy tanks have no shortfall variables at all.
+`shortfall[t] >= 0` (K) measures the dip, and `T_tank[t]` has no fixed lower bound in this mode (a large draw can take the tank more than a few kelvin below the floor). `floor_shortfall_kh` returns `sum(shortfall[t] * dt)` in K·h. Legacy tanks have no shortfall variables at all.
+
+**Lexicographic priority.** Holding the floor comes before every other goal, and a weighted penalty cannot guarantee that (it is a compromise whose outcome depends on prices, units and the import lock of `minimize_consumption`). Instead `_bound_floor_shortfall` in `build_and_solve`, after the hard caps and before the battery-care probe:
+
+1. Returns at once when no tank has shortfall variables, so other configurations keep an identical solve sequence.
+2. Minimises the total shortfall alone, with a sixth of the cycle budget.
+3. With a solution (optimal or a time-limited incumbent), reads `S*` and adds the hard constraint `sum(shortfall[t] * dt) <= S* + 1e-3`. When the floor can be held, `S* = 0` and the tank behaves exactly like a hard floor. An incumbent bound is valid but may be looser than the true minimum.
+4. When the model is proven infeasible, adds nothing; the main solve reports it through the fault path.
+5. Without a solution in its time, keeps the shortfall objective: the probe and the strategy are skipped, the rest of the budget minimises shortfall, and the result is marked `strategy_degraded`. The floor is never silently dropped or forced hard on a timeout.
+
+Everything after the bound (the probe, every strategy and the terminal value) runs unchanged and cannot trade tank temperature away, and no shortfall term enters their objectives, so the solver's relative gap applies to the secondary objective alone. The time spent on the pre-solve and the probe is deducted once: `ObjectiveBuilder.build(..., time_budget_s=remaining)` receives what is left, which `minimize_consumption` splits between its phases. `apply_gain_threshold` leaves a degraded result unchanged, because zeroing part of its dispatch could break the constraints it was solved under.
 
 ## Space heating heat pump model
 

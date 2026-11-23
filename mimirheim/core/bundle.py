@@ -687,9 +687,13 @@ class SolveResult(BaseModel):
             can fail to establish a minimum: no solution at all, in which case
             no volume is locked and the second phase solves for cost alone; or
             a time-limited incumbent, which is locked but is an achievable
-            volume rather than a proven minimum. ``strategy`` still names what
-            was asked for, so this flag is the only thing saying the schedule
-            does not carry the minimum-import guarantee that name implies.
+            volume rather than a proven minimum. Also set by any strategy when
+            the floor-shortfall pre-solve of a standby-loss thermal boiler
+            found no solution in its time, so the schedule only minimises tank
+            shortfall. ``strategy`` still names what was asked for, so this
+            flag is the only thing saying the schedule does not carry the
+            guarantee that name implies. The flag is informational: the
+            schedule is dispatched as usual.
         solve_time_utc: The 15-minute slot boundary that step 0 of ``schedule``
             refers to, copied from ``SolveBundle.solve_time_utc``. This is the
             single time origin for the whole result: every consumer that needs

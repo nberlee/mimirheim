@@ -54,6 +54,59 @@ logger = logging.getLogger("mimirheim.solver")
 _CARE_EPS_KWH = 1e-6
 
 
+# Clock used to measure the preliminary solves; a module attribute so tests
+# can replace it without patching time.monotonic for every caller.
+_monotonic = time.monotonic
+
+# Absolute tolerance in K·h on the floor-shortfall bound, so the bound found
+# by the pre-solve stays feasible for the later solves despite rounding.
+_SHORTFALL_BOUND_TOL_KH: float = 1e-3
+
+
+def _bound_floor_shortfall(ctx: ModelContext, thermal_boilers: list[Any], config: MimirheimConfig) -> tuple[float, str]:
+    """Find the least achievable floor shortfall and hold it as a hard bound.
+
+    Standby-mode tanks have a soft floor (see IMPLEMENTATION_DETAILS.md §8,
+    subsection "Soft tank floor"). Holding the floor is the first priority,
+    so the total shortfall is minimised alone before any other objective,
+    and the result becomes a hard constraint for everything that follows.
+
+    Args:
+        ctx: The model context with every device's constraints in place.
+        thermal_boilers: The thermal boiler devices.
+        config: Static configuration, for the solver budget.
+
+    Returns:
+        ``(elapsed_seconds, mode)``. ``mode`` is ``"none"`` (no standby
+        tank: nothing was set, added or solved), ``"bounded"`` (the bound
+        was added), ``"infeasible"`` (the model is proven unsatisfiable;
+        nothing was added and the main solve reports it) or
+        ``"shortfall_only"`` (no solution within the time limit; the
+        shortfall objective stays set and the caller keeps minimising it).
+    """
+    terms = [e for e in (tb.floor_shortfall_kh(ctx) for tb in thermal_boilers) if e is not None]
+    if not terms:
+        return 0.0, "none"
+    started = _monotonic()
+    total: Any = terms[0]
+    for term in terms[1:]:
+        total = total + term
+    ctx.solver.set_objective_minimize(total)
+    status = ctx.solver.solve(time_limit_seconds=config.solver.time_limit_seconds / 6.0)
+    elapsed = _monotonic() - started
+    if status in ("optimal", "feasible"):
+        # S*: the least total shortfall found, in K·h.
+        best = ctx.solver.var_value(total)
+        # Hard bound: no later objective may let the tanks dip further.
+        ctx.solver.add_constraint(total <= best + _SHORTFALL_BOUND_TOL_KH)
+        return elapsed, "bounded"
+    if getattr(ctx.solver, "last_status_proved_infeasible", False):
+        return elapsed, "infeasible"
+    # No logging here (build_and_solve stays free of side effects); the
+    # caller marks the result strategy_degraded, which the solve loop reports.
+    return elapsed, "shortfall_only"
+
+
 def _probe_care_targets(
     ctx: ModelContext,
     batteries: list[Battery],
@@ -100,7 +153,7 @@ def _probe_care_targets(
     # still has a workable half left after this. The probe carries no prices,
     # so it normally finishes far inside that.
     budget = config.solver.time_limit_seconds / 3.0
-    started = time.monotonic()
+    started = _monotonic()
 
     gap_sum: Any = None
     for bat in due:
@@ -113,11 +166,11 @@ def _probe_care_targets(
             gap_sum = gap if gap_sum is None else gap_sum + gap
 
     if gap_sum is None:
-        return time.monotonic() - started
+        return _monotonic() - started
 
     ctx.solver.set_objective_minimize(gap_sum)
     status = ctx.solver.solve(time_limit_seconds=budget)
-    elapsed = time.monotonic() - started
+    elapsed = _monotonic() - started
 
     if status == "infeasible":
         # No witness, so nothing is imposed. Either the model is already
@@ -502,11 +555,6 @@ def build_and_solve(bundle: SolveBundle, config: MimirheimConfig) -> SolveResult
                 f"bundle.thermal_boiler_inputs."
             )
         tb.add_constraints(ctx, inputs=tb_inputs)
-        # Standby tanks model a soft floor; this solve holds it hard by
-        # keeping their total shortfall at zero.
-        shortfall_kh = tb.floor_shortfall_kh(ctx)
-        if shortfall_kh is not None:
-            ctx.solver.add_constraint(shortfall_kh <= 0.0)
 
     for sh in space_heating_hps:
         sh_inputs = bundle.space_heating_inputs.get(sh.name)
@@ -550,7 +598,11 @@ def build_and_solve(bundle: SolveBundle, config: MimirheimConfig) -> SolveResult
     objective_builder = ObjectiveBuilder()
     objective_builder.add_hard_cap_constraints(ctx, grid, config)
 
-    probe_seconds = _probe_care_targets(ctx, batteries, config)
+    # Floor shortfall first: its bound must be in place before the probe and
+    # every strategy, so none of them can trade tank temperature away.
+    shortfall_seconds, shortfall_mode = _bound_floor_shortfall(ctx, thermal_boilers, config)
+    shortfall_only = shortfall_mode == "shortfall_only"
+    probe_seconds = 0.0 if shortfall_only else _probe_care_targets(ctx, batteries, config)
 
     # Carried on the result so the publisher can put the floor and the
     # last-full timestamp on a retained topic. That topic is also where the
@@ -592,18 +644,29 @@ def build_and_solve(bundle: SolveBundle, config: MimirheimConfig) -> SolveResult
     # minimize_consumption is lexicographic and spends part of it on its
     # phase-1 solve inside build(). Passing the returned value through is what
     # keeps a two-phase solve inside the configured budget.
-    objective_builder = ObjectiveBuilder()
-    solve_budget_seconds = objective_builder.build(
-        ctx, all_devices, grid, bundle, config
-    )
-    strategy_degraded = objective_builder.strategy_degraded
-    # The probe spent part of the cycle's budget, so the final solve gets what
-    # is left rather than the full allowance. Floored just above zero rather
+    # The preliminary solves spent part of the cycle's budget, so the strategy
+    # gets what is left, deducted once here. Floored just above zero rather
     # than at a whole second, so a cycle configured with a short budget is not
     # silently given several times what it asked for. The floor is still a
     # floor: a time_limit_seconds below 1 ms would overrun it, which is not a
     # configuration worth contorting this arithmetic for.
-    solve_budget_seconds = max(1e-3, solve_budget_seconds - probe_seconds)
+    remaining_seconds = max(
+        1e-3, config.solver.time_limit_seconds - shortfall_seconds - probe_seconds
+    )
+    if shortfall_only:
+        # The pre-solve ran out of time without any solution: keep its
+        # shortfall objective (still set on the model) and spend the rest of
+        # the budget on it. The hard caps are already in the model, added
+        # before the pre-solve.
+        solve_budget_seconds = remaining_seconds
+        strategy_degraded = True
+    else:
+        objective_builder = ObjectiveBuilder()
+        solve_budget_seconds = objective_builder.build(
+            ctx, all_devices, grid, bundle, config, time_budget_s=remaining_seconds
+        )
+        strategy_degraded = objective_builder.strategy_degraded
+    solve_budget_seconds = max(1e-3, solve_budget_seconds)
 
     # --- Log model size ---
     # Logged at DEBUG so it appears when the operator runs with --log-level DEBUG

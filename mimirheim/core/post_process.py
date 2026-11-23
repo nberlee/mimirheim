@@ -95,6 +95,12 @@ def apply_gain_threshold(
     if result.solve_status == "infeasible":
         return result
 
+    # A degraded result was not optimised for cost; zeroing part of its
+    # dispatch could break the constraints it was solved under (for example
+    # battery support that keeps heating within the import limit).
+    if result.strategy_degraded:
+        return result
+
     if bundle.strategy not in _THRESHOLD_STRATEGIES:
         return result
 

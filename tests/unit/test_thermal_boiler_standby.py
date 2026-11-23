@@ -195,12 +195,12 @@ def _system(draw_kw: list[float] | None, use_draw_forecast: bool = True) -> tupl
     return bundle, config
 
 
-def test_build_and_solve_holds_the_floor_hard_for_now() -> None:
-    """Until the shortfall pre-solve exists, build_and_solve keeps the floor hard."""
+def test_build_and_solve_absorbs_an_uncoverable_draw() -> None:
+    """The soft floor keeps the solve feasible; see test_floor_shortfall_presolve.py for its priority."""
     bundle, config = _system([0.5, 0.5, 0.5, 0.5])
     assert build_and_solve(bundle, config).solve_status in ("optimal", "feasible")
     bundle, config = _system([40.0, 0.0, 0.0, 0.0])
-    assert build_and_solve(bundle, config).solve_status == "infeasible"
+    assert build_and_solve(bundle, config).solve_status in ("optimal", "feasible")
 
 
 def test_build_and_solve_rejects_a_missing_draw_series() -> None:

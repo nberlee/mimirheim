@@ -65,6 +65,7 @@ class ObjectiveBuilder:
         grid: Grid,
         bundle: SolveBundle,
         config: MimirheimConfig,
+        time_budget_s: float | None = None,
     ) -> float:
         """Set the objective on ctx.solver according to bundle.strategy.
 
@@ -96,25 +97,27 @@ class ObjectiveBuilder:
                 prices, and per-step confidence values.
             config: Static configuration including strategy weights, optional
                 hard-cap constraints, and the solver time budget.
+            time_budget_s: Seconds of the cycle's budget still available, after
+                any preliminary solves. None means the whole
+                ``config.solver.time_limit_seconds``.
 
         Returns:
             Seconds of solver wall-clock budget remaining for the caller's
-            solve. Equal to ``config.solver.time_limit_seconds`` for
-            single-phase strategies, and the unspent remainder for
-            ``minimize_consumption``.
+            solve. Equal to the available budget for single-phase strategies,
+            and the unspent remainder for ``minimize_consumption``.
 
         Raises:
             ValueError: If ``bundle.strategy`` is not one of the three
                 supported strings.
         """
         self.add_hard_cap_constraints(ctx, grid, config)
-        budget = config.solver.time_limit_seconds
+        budget = config.solver.time_limit_seconds if time_budget_s is None else time_budget_s
 
         if bundle.strategy == "minimize_cost":
             self._minimize_cost(ctx, devices, grid, bundle, config)
             return budget
         if bundle.strategy == "minimize_consumption":
-            return self._minimize_consumption(ctx, devices, grid, bundle, config)
+            return self._minimize_consumption(ctx, devices, grid, bundle, config, budget)
         if bundle.strategy == "balanced":
             self._balanced(ctx, devices, grid, bundle, config)
             return budget
@@ -310,6 +313,7 @@ class ObjectiveBuilder:
         grid: Grid,
         bundle: SolveBundle,
         config: MimirheimConfig,
+        budget: float,
     ) -> float:
         """Set a two-phase lexicographic consumption-minimisation objective.
 
@@ -346,8 +350,8 @@ class ObjectiveBuilder:
         phase 2, where it acts as a tiebreaker among solutions with equal
         phase-1 import volume.
 
-        **Time budget.** ``config.solver.time_limit_seconds`` covers the whole
-        solve cycle, not one solver invocation, so the two phases split it
+        **Time budget.** ``budget`` is what remains of the whole solve cycle
+        after any preliminary solves, not one solver invocation, so the two phases split it
         evenly rather than each taking the full amount. An even split is used
         instead of measuring phase-1 elapsed time because it keeps the model
         build free of clock reads and gives a predictable worst case. Phase 1
@@ -360,13 +364,13 @@ class ObjectiveBuilder:
                 terminal SoC value terms in phase 2.
             grid: Grid device providing import and export variables.
             bundle: Runtime inputs with per-step prices and confidence values.
-            config: Static configuration containing objective weights and the
-                solver time budget.
+            config: Static configuration containing objective weights.
+            budget: Seconds of the cycle's budget available to both phases.
 
         Returns:
             Seconds of solver budget left for the caller's phase-2 solve.
         """
-        phase_budget = config.solver.time_limit_seconds / 2.0
+        phase_budget = budget / 2.0
 
         # Phase 1: minimise total import.
         import_vars = [grid.import_[t] for t in ctx.T]
@@ -415,7 +419,7 @@ class ObjectiveBuilder:
             self._set_objective(
                 ctx, self._cost_objective_terms(ctx, devices, grid, bundle, config)
             )
-            return config.solver.time_limit_seconds - phase_budget
+            return budget - phase_budget
 
         # Record the optimal total import and lock it in with a small slack.
         # The slack prevents numeric infeasibility if the phase-1 optimal value
@@ -441,7 +445,7 @@ class ObjectiveBuilder:
             ctx, self._cost_objective_terms(ctx, devices, grid, bundle, config)
         )
 
-        return config.solver.time_limit_seconds - phase_budget
+        return budget - phase_budget
 
     def _balanced(
         self,
