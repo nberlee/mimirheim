@@ -283,6 +283,45 @@ on[t+τ]  >= start[t]   for τ in 1..min_run_steps-1, where t+τ < horizon
 
 - *Propagating a `t=0` start explicitly.* `start[t]` is only defined for `t >= 1` (it compares against `t-1`), so the sentinel loop alone does not constrain what happens if the device is already on at `t=0` (e.g. still running from the previous solve cycle, short of the minimum run length). A direct constraint `on[tau] >= on[0]` for `tau` in `1 .. min_run_steps-1` propagates a `t=0` start forward, mirroring what the sentinel enforces for a start at any other step.
 
+### Thermal boiler compressor
+
+A thermal boiler configured with `compressor` (instead of the legacy `elec_power_kw` and `cop`) reuses the on/off binary `on[t]` and the start-sentinel minimum run, but changes three things.
+
+**Within-step convention.** Heat is added first and the cooling loss is removed afterwards. The highest temperature inside step `t` is therefore `T_tank[t-1] + rise` and the lowest is the lower endpoint, where `rise = heat_output_kw * dt / (V * c_p)`.
+
+**Heating ceiling.** The compressor runs only when the step peak stays at or below `ceiling = min(compressor.max_temp_c, setpoint_c)`. The source limit is physical; the setpoint is the heating target. For `t >= 1`:
+
+```
+T_tank[t-1] + rise <= ceiling + M * (1 - on[t]),   M = max(0, upper + rise - ceiling)
+```
+
+`M` is the largest possible excess, so the constraint is inactive when the compressor is off. At `t = 0` the start temperature is a measured constant, and `on[0]` is fixed to 0 when `T0 + rise > ceiling`. Because the ceiling applies to the peak, not to the end-of-step temperature, a draw in the same step cannot hide heating above the limit. The cost is at most one step of unused headroom below the limit.
+
+There is no end-of-step cap at the setpoint in this mode. A tank left hot by other heating (for example the appliance's own disinfection program) starts above every limit, cannot heat, and cools passively instead of making the model infeasible.
+
+**Temperature bounds.** `T_tank[t] >= min_temp_c` as in legacy mode, and `T_tank[t] <= upper` with `upper = max(tank_max_temp_c(), T0)`. Heating only happens below the ceiling, so the tank can never exceed the larger of its highest limit and its start temperature; the bound is implied by the dynamics and is stated explicitly because the linearisation below needs it.
+
+**Electric power.** The compressor's electric power rises with the tank temperature, because a hotter tank means a higher condensing temperature. It is a straight line in the start-of-step temperature, shifted by the source temperature:
+
+```
+P[t] = (intercept + s_src * (T_src - T_ref)) * on[t] + slope * z[t],   z[t] = on[t] * T_tank[t-1]
+```
+
+`T_src` is the optional runtime source temperature; when it is missing or unusable the reference `T_ref` is used. At `t = 0`, `T_tank[t-1]` is the measured constant (clamped to the validated range `[min_temp_c - 5, tank_max_temp_c()]`), so `P[0]` is linear without help.
+
+For `t >= 1` the product of a binary and a bounded continuous variable is replaced by `z[t]` with four inequalities (an exact linearisation, sometimes called McCormick envelopes; it is exact rather than approximate because one factor is binary):
+
+```
+z[t] >= lower * on[t]
+z[t] <= upper * on[t]
+z[t] >= T_tank[t-1] - upper * (1 - on[t])
+z[t] <= T_tank[t-1] - lower * (1 - on[t])
+```
+
+With `on[t] = 0` the first two force `z[t] = 0` and the last two are slack; with `on[t] = 1` the last two force `z[t] = T_tank[t-1]` and the first two are slack. `lower = min_temp_c` and `upper` as above are valid bounds on `T_tank[t-1]`, so no feasible schedule is cut off. When `slope = 0` the power does not depend on the tank temperature and `z` is not created.
+
+The compressor runs full steps only (no partial duty within a step), so the product is exact and the minimum run acts on real operation. The config validator checks that the power is finite and positive at the four corners of (tank range x source range); the power is linear in both, so every value in between is positive too.
+
 ## Space heating heat pump model
 
 `SpaceHeatingDevice` supports two modes configured via `SpaceHeatingConfig.mode`:
