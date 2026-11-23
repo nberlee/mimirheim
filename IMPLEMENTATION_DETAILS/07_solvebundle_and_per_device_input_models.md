@@ -62,8 +62,15 @@ class ThermalBoilerInputs(BaseModel):
     The initial tank temperature is required because the solver must track tank
     temperature as a decision variable across the horizon. Without the initial
     state the first-step constraint cannot be formed.
+
+    The compressor fields are optional and default to "unknown": the device
+    then uses the configured reference source temperature and leaves the
+    first step free of the minimum run.
     """
     current_temp_c: float
+    source_temp_c: float | None = None        # None when absent or unusable
+    source_temp_invalid: bool = False         # True when a received reading was unusable
+    current_run_minutes: float | None = Field(default=None, ge=0)
 
 class SpaceHeatingInputs(BaseModel):
     """Current state for a space heating heat pump.
@@ -132,6 +139,7 @@ class DeviceSetpoint(BaseModel):
     type: str                # device type derived from config section (e.g. "battery", "ev_charger")
     soc_kwh: float | None    # terminal SOC in kWh at end of step; None for non-storage devices
     planned_temp_c: float | None  # planned tank temperature in °C at end of step; thermal boilers only
+    active_source: Literal["off", "heater", "compressor", "element"] | None  # thermal boilers only
 
 class ScheduleStep(BaseModel):
     t: int                   # time step index

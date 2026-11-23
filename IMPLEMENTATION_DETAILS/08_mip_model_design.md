@@ -331,6 +331,8 @@ The compressor runs full steps only (no partial duty within a step), so the prod
 
 Runs that would extend past the horizon end are truncated there; the next solve sees the run in `current_run_minutes` and continues it.
 
+**Terminal value.** The end-of-horizon reward converts the heat stored above `min_temp_c` into the electricity needed to replace it. With a compressor the conversion uses `cop_ref = heat_output_kw / elec_kw(setpoint_c, source_ref_temp_c)`, the compressor's COP at the setpoint; an element-only tank uses 1.0, and a legacy tank its `cop`.
+
 **Element.** The element converts electricity to heat one to one. Its power `elem_kw[t]` is continuous in `[0, power_kw]`, so it can stop exactly at a target temperature (the executor ends heating when the target is reached). A binary `elem_on[t]` exists only to keep the element out of compressor steps and to switch its ceiling:
 
 ```

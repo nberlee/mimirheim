@@ -165,7 +165,7 @@ Confidence is applied to revenue/cost terms only, never to constraints. Physical
 | Static load | `static_loads` | Fixed parameter (forecast, no decision variable) |
 | Grid | `grid` | `import[t]`, `export[t]` |
 | Hybrid inverter | `hybrid_inverters` | `charge_seg[t,i]`, `discharge_seg[t,i]`, `soc[t]`, `pv[t]` (clipped forecast) |
-| Thermal boiler | `thermal_boilers` | `T_tank[t]`, `on[t]` (binary) |
+| Thermal boiler | `thermal_boilers` | `T_tank[t]`, `on[t]` (binary heater or compressor); with an element `elem_kw[t]`, `elem_on[t]` |
 | Space heating HP | `space_heating_hps` | `hp_on[t]` (on/off) or SOS2 mode variable; optional `T_indoor[t]` (BTM) |
 | Combi heat pump | `combi_heat_pumps` | `T_tank[t]`, `dhw_mode[t]`, `sh_mode[t]`, `hp_on[t]`; optional `T_indoor[t]` (BTM) |
 
@@ -185,7 +185,12 @@ A hybrid inverter combines battery storage with a directly coupled PV input. The
 
 ### Thermal boiler
 
-An electric resistance boiler with a hot-water tank. Tank temperature is tracked as a decision variable across the horizon. The solver may run the boiler element (`on[t] = 1`) at any step to raise the tank temperature, subject to a minimum tank temperature (to satisfy DHW demand) and a maximum temperature (safety limit). The binary `on[t]` variable incurs a minimum run-time constraint to avoid short cycling.
+A hot-water tank whose temperature is tracked as a decision variable across the horizon, subject to a minimum tank temperature (to satisfy DHW demand). It is heated in one of two ways:
+
+- **Legacy heater** (`elec_power_kw`, optional `cop`): one on/off heater with a fixed electric power. The tank stays at or below `setpoint_c`.
+- **Heat sources** (`compressor` and/or `element`): a heat pump compressor with a fixed heat output whose electric power rises with the tank temperature (and optionally shifts with the heat source temperature), and a resistive element that can run at any power up to its rating. The two never run in the same step. Each heats only while the tank stays at or below the lower of its own `max_temp_c` and `setpoint_c` within the step; a tank that is already hotter cools passively.
+
+The binary on/off variable of the heater or compressor carries a minimum run-time constraint to avoid short cycling. With a compressor, `current_run_minutes` carries a run that started before the solve across the start of the horizon.
 
 ### Space heating heat pump
 
@@ -477,6 +482,22 @@ Published retained. Required for each configured thermal boiler that has `inputs
 58.3
 ```
 
+### Thermal boiler source temperature: topic from `thermal_boilers.*.inputs.topic_source_temp`
+
+Optional; only used when `compressor` is configured, and never required for a solve. Published retained. Payload is a plain numeric string with the compressor's heat source temperature in degrees Celsius (for example the brine of a ground-source heat pump). A reading that is not a finite number, or that lies outside `compressor.source_temp_min_c` .. `source_temp_max_c`, is ignored: the reference `source_ref_temp_c` is used and a warning is logged once.
+
+```
+9.4
+```
+
+### Thermal boiler compressor run time: topic from `thermal_boilers.*.inputs.topic_current_run_minutes`
+
+Optional; only used when `compressor` is configured, and never required for a solve. Published retained. Payload is a plain numeric string with the number of minutes the compressor has been running, or `0` while it is off. The minimum run lasts `min_run_steps * 15` minutes. A run that has not reached it continues for the remaining time rounded up to whole steps, stopping early only where the tank would pass the compressor's ceiling. A start in the first step must last `min_run_steps` steps. Both are truncated at the horizon end; the next solve sees the run in this input and continues it. Without this input the first step is not constrained by the minimum run.
+
+```
+20
+```
+
 ### Space heating demand — topic from `space_heating_hps.*.inputs.topic_heat_needed_kwh`
 
 Published retained. Required for each configured space heating HP that has `inputs` configured. Payload is a plain numeric string representing the heat energy demand for the horizon in kWh:
@@ -591,8 +612,10 @@ Published retained for each device in the current step (`t=0`):
 
 A thermal boiler's payload also carries `planned_temp_c`, the tank temperature in °C that the plan expects at the end of the step, rounded to two decimals. A heater controlled by a temperature band (for example a heat pump's hot water setpoint) can use it as the temperature to heat to. The key is omitted when no planned temperature is available:
 
+It also carries `active_source`, the heat source running in the step: `heater` for a legacy boiler, `compressor` or `element` for a boiler with heat sources, or `off`. An executor with several heat sources follows it per step:
+
 ```json
-{"kw": -3.0, "type": "thermal_boiler", "planned_temp_c": 51.42}
+{"kw": -3.0, "type": "thermal_boiler", "planned_temp_c": 51.42, "active_source": "heater"}
 ```
 
 HA automations can subscribe directly to `mimirheim/device/home_battery/setpoint` rather than parsing the full schedule JSON.
@@ -956,14 +979,25 @@ Two limitations apply when fitting the parameters:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `capacity_litres` | float > 0 | — | Tank volume in litres. |
-| `min_temp_c` | float | — | Minimum tank temperature required to satisfy DHW demand (°C). |
-| `max_temp_c` | float | — | Maximum permissible tank temperature (°C). |
-| `heat_loss_coeff_kw_per_k` | float > 0 | — | Tank heat loss coefficient (kW/K). |
-| `element_power_kw` | float > 0 | — | Electrical power of the heating element (kW). |
-| `cop` | float > 0 | 1.0 | Coefficient of performance (1.0 for pure resistance). |
-| `min_run_steps` | int ≥ 0 | 0 | Minimum consecutive steps the element must run once switched on (avoids short cycling). |
+| `volume_liters` | float > 0 | — | Tank volume in litres. |
+| `setpoint_c` | float | — | Target hot water temperature (°C). Legacy heater: the tank stays at or below it. Heat sources: heating stops at the lower of this and the source's `max_temp_c`. |
+| `min_temp_c` | float | 40.0 | Minimum tank temperature required to satisfy DHW demand (°C). Must be below `setpoint_c`. |
+| `cooling_rate_k_per_hour` | float ≥ 0 | — | Temperature drop per hour from standby losses and typical draws (K/h). |
+| `elec_power_kw` | float > 0 or null | null | Legacy heater: electric power when on (kW). Required unless `compressor` or `element` is set; must be absent with them. |
+| `cop` | float > 0 or null | null | Legacy heater: coefficient of performance (1.0 when unset). Must be absent with `compressor` or `element`. |
+| `compressor.heat_output_kw` | float > 0 | — | Heat delivered to the tank while the compressor runs (kW). |
+| `compressor.elec_kw_at_temp` | list of 2 `{temp_c, elec_kw}` | — | Electric power at two distinct tank temperatures; the straight line through them is used. |
+| `compressor.max_temp_c` | float | — | Highest tank temperature the compressor can reach (°C). |
+| `compressor.source_ref_temp_c` | float | 10.0 | Source temperature at which the curve was measured (°C). |
+| `compressor.elec_kw_per_k_source` | float | 0.0 | Electric power change per K of source temperature above the reference (kW/K). |
+| `compressor.source_temp_min_c` / `source_temp_max_c` | float | -20.0 / 40.0 | Plausible source temperature range; readings outside it are ignored. The power must stay positive over this range and the tank range. |
+| `element.power_kw` | float > 0 | — | Rated power of the resistive element (kW, electric and heat). |
+| `element.max_temp_c` | float | — | Highest tank temperature the element may heat to (°C). |
+| `min_run_steps` | int ≥ 0 | 0 | Minimum consecutive steps the heater or compressor runs once started. Must be 0 or 1 for an element-only tank. |
+| `wear_cost_eur_per_kwh` | float ≥ 0 | 0.0 | Cycling cost per kWh of electricity; with heat sources it applies to compressor electricity only. |
 | `inputs.topic_current_temp` | string or null | derived | MQTT topic for the current tank temperature (plain float, °C). Derived as `{prefix}/input/thermal_boiler/{name}/temp_c`. |
+| `inputs.topic_source_temp` | string or null | derived | Optional compressor source temperature (°C). Derived as `{prefix}/input/thermal_boiler/{name}/source_temp_c` when `compressor` is set. |
+| `inputs.topic_current_run_minutes` | string or null | derived | Optional compressor run time (minutes, 0 when off). Derived as `{prefix}/input/thermal_boiler/{name}/current_run_minutes` when `compressor` is set. |
 
 #### `space_heating_hps` (dict, keyed by device name)
 
@@ -1077,6 +1111,8 @@ a Home Assistant entity topic) or when sharing a topic between multiple instance
 | `deferrable_loads.{name}.topic_window_latest` | `{p}/input/deferrable/{name}/window_latest` |
 | `deferrable_loads.{name}.topic_committed_start_time` | `{p}/input/deferrable/{name}/committed_start` |
 | `thermal_boilers.{name}.inputs.topic_current_temp` | `{p}/input/thermal_boiler/{name}/temp_c` |
+| `thermal_boilers.{name}.inputs.topic_source_temp` (with `compressor`) | `{p}/input/thermal_boiler/{name}/source_temp_c` |
+| `thermal_boilers.{name}.inputs.topic_current_run_minutes` (with `compressor`) | `{p}/input/thermal_boiler/{name}/current_run_minutes` |
 | `space_heating_hps.{name}.inputs.topic_heat_needed_kwh` | `{p}/input/space_heating/{name}/heat_needed_kwh` |
 | `space_heating_hps.{name}.inputs.topic_heat_produced_today_kwh` | `{p}/input/space_heating/{name}/heat_produced_today_kwh` |
 | `space_heating_hps.{name}.building_thermal.inputs.topic_current_indoor_temp_c` | `{p}/input/space_heating/{name}/btm/indoor_temp_c` |
@@ -1216,6 +1252,7 @@ For battery and EV charger setpoint sensors, each entry contains:
 For thermal boiler setpoint sensors, each entry contains:
 - `kw`: scheduled power in kW (negative = heating)
 - `planned_temp_c`: planned tank temperature in °C at the end of the step (2 dp), or `null` when unavailable
+- `active_source`: heat source running in the step (`heater`, `compressor`, `element` or `off`), or `null` when unavailable
 
 For all other device setpoint sensors, each entry contains only `kw`. For the grid sensor, each entry contains `import` and `export` (both in kW, rounded to 3 decimal places).
 

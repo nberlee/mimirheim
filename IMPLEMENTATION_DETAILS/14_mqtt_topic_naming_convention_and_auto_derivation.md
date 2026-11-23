@@ -88,6 +88,8 @@ topics use `{p}/input/...`; output topics use `{p}/output/...`.
 | `deferrable_loads.{name}.topic_window_latest` | `{p}/input/deferrable/{name}/window_latest` |
 | `deferrable_loads.{name}.topic_committed_start_time` | `{p}/input/deferrable/{name}/committed_start` |
 | `thermal_boilers.{name}.inputs.topic_current_temp` | `{p}/input/thermal_boiler/{name}/temp_c` |
+| `thermal_boilers.{name}.inputs.topic_source_temp` (with `compressor`) | `{p}/input/thermal_boiler/{name}/source_temp_c` |
+| `thermal_boilers.{name}.inputs.topic_current_run_minutes` (with `compressor`) | `{p}/input/thermal_boiler/{name}/current_run_minutes` |
 | `space_heating_hps.{name}.inputs.topic_heat_needed_kwh` | `{p}/input/space_heating/{name}/heat_needed_kwh` |
 | `space_heating_hps.{name}.inputs.topic_heat_produced_today_kwh` | `{p}/input/space_heating/{name}/heat_produced_today_kwh` |
 | `space_heating_hps.{name}.building_thermal.inputs.topic_current_indoor_temp_c` | `{p}/input/space_heating/{name}/btm/indoor_temp_c` |
