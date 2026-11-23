@@ -654,6 +654,10 @@ class MqttClient:
         for tb_cfg in config.thermal_boilers.values():
             if tb_cfg.inputs is not None:
                 handlers[tb_cfg.inputs.topic_current_temp] = parse_thermal_boiler_temp
+                # The draw forecast only when the feature is on; a topic kept
+                # in the config while disabled is not subscribed.
+                if tb_cfg.use_draw_forecast and tb_cfg.inputs.topic_draw_forecast is not None:
+                    handlers[tb_cfg.inputs.topic_draw_forecast] = parse_power_forecast
 
         # Space heating heat pump demand topics (plan 26).
         for sh_cfg in config.space_heating_hps.values():

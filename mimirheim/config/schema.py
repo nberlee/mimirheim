@@ -2506,10 +2506,20 @@ class ThermalBoilerInputsConfig(BaseModel):
             in degrees Celsius. The payload must be a plain numeric string or
             a JSON number. The topic must be retained so mimirheim receives the
             most recent value on reconnect.
+        topic_draw_forecast: MQTT topic publishing the hot water draw forecast
+            as ``[{ts, kw}]`` (kW thermal, average over the interval starting
+            at ``ts``). Used and required only with ``use_draw_forecast``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
+    topic_draw_forecast: str | None = Field(
+        default=None,
+        description=(
+            "MQTT topic publishing the hot water draw forecast [{ts, kw}] in kW thermal, retained. "
+            "Defaults to '{mqtt.topic_prefix}/input/thermal_boiler/{name}/draw_forecast' when use_draw_forecast is set."
+        ),
+    )
     topic_current_temp: str | None = Field(
         default=None,
         description=(
@@ -3156,6 +3166,8 @@ class MimirheimConfig(BaseModel):
         for name, cfg in self.thermal_boilers.items():
             if cfg.inputs is not None and cfg.inputs.topic_current_temp is None:
                 cfg.inputs.topic_current_temp = _topics.thermal_boiler_temp_topic(p, name)
+            if cfg.inputs is not None and cfg.use_draw_forecast and cfg.inputs.topic_draw_forecast is None:
+                cfg.inputs.topic_draw_forecast = _topics.thermal_boiler_draw_forecast_topic(p, name)
 
         for name, cfg in self.space_heating_hps.items():
             if cfg.inputs is not None:

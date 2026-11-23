@@ -725,6 +725,11 @@ THERMAL_BOILER_INPUTS_FORM_SPEC = FormSpec(
             description="MQTT topic publishing the current water temperature in degrees C, retained.",
             tier=Tier.EXPERT,
         ),
+        "topic_draw_forecast": FieldSpec(
+            label="Draw forecast topic",
+            description="MQTT topic publishing the hot water draw forecast [{ts, kw}] in kW thermal, retained.",
+            tier=Tier.EXPERT,
+        ),
     }
 )
 

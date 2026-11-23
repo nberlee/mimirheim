@@ -21,6 +21,8 @@ vocabulary between the IO layer (which populates the models) and the solver core
 
 from datetime import datetime
 
+from typing import Annotated
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -131,8 +133,10 @@ class PowerForecastStep(BaseModel):
 
     Attributes:
         ts: UTC datetime of this forecast point.
-        kw: Forecast power in kW. Must be non-negative (generation for PV,
-            consumption for base load — both are strictly positive quantities).
+        kw: Forecast power in kW. Must be non-negative and finite (generation
+            for PV, consumption for base load, hot water draw: all positive
+            quantities). A non-finite value is rejected at parsing, so a bad
+            payload never replaces the last valid forecast.
         confidence: Forecast confidence in [0, 1]. Defaults to 1.0 when
             not supplied by the data source.
     """
@@ -140,7 +144,7 @@ class PowerForecastStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ts: datetime
-    kw: float = Field(ge=0, description="Forecast power in kW.")
+    kw: float = Field(ge=0, allow_inf_nan=False, description="Forecast power in kW.")
     confidence: float = Field(ge=0.0, le=1.0, default=1.0, description="Forecast confidence [0, 1].")
 
 
@@ -250,12 +254,24 @@ class ThermalBoilerInputs(BaseModel):
         current_temp_c: Current water temperature in degrees Celsius, as read
             from the tank sensor. The solver uses this as the initial temperature
             for the first step's temperature-dynamics constraint.
+        draw_kw: Hot water draw per horizon step in kW thermal, resampled from
+            the draw forecast, or None when the tank does not use one. Same
+            length as the horizon.
+        draw_forecast: The raw timestamped draw forecast, kept unclipped so a
+            model can read draws beyond the main horizon; its coverage ends at
+            the last ``ts``. None when the tank does not use one.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     current_temp_c: float = Field(
         description="Current water temperature in °C, as read from sensor."
+    )
+    draw_kw: list[Annotated[float, Field(ge=0, allow_inf_nan=False)]] | None = Field(
+        default=None, description="Hot water draw per step in kW thermal."
+    )
+    draw_forecast: list[PowerForecastStep] | None = Field(
+        default=None, description="Raw timestamped hot water draw forecast."
     )
 
 
@@ -409,6 +425,23 @@ class SolveBundle(BaseModel):
             "automation when the load physically begins."
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_thermal_draws(self) -> "SolveBundle":
+        """Reject a per-step draw series that does not cover the horizon.
+
+        The thermal boiler model indexes ``draw_kw`` by step; a shorter list
+        would fail inside the solve, and a longer one would silently use
+        draws for steps the horizon does not contain.
+        """
+        n = len(self.horizon_prices)
+        for name, inputs in self.thermal_boiler_inputs.items():
+            if inputs.draw_kw is not None and len(inputs.draw_kw) != n:
+                raise ValueError(
+                    f"thermal_boiler_inputs[{name!r}].draw_kw has {len(inputs.draw_kw)} steps "
+                    f"but the horizon has {n}."
+                )
+        return self
 
     @model_validator(mode="after")
     def _pv_forecasts_consistent(self) -> "SolveBundle":

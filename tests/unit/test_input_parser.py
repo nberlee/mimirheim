@@ -73,6 +73,14 @@ def test_parse_power_forecast_rejects_empty_array() -> None:
         parse_power_forecast(json.dumps([]))
 
 
+@pytest.mark.parametrize("raw_kw", ["1e309", "Infinity", "NaN"])
+def test_parse_power_forecast_rejects_non_finite_power(raw_kw: str) -> None:
+    """A non-finite kw raises, so the MQTT client keeps the previous valid forecast."""
+    payload = '[{"ts": "%s", "kw": %s}]' % (_now_iso(), raw_kw)
+    with pytest.raises(ValueError):
+        parse_power_forecast(payload)
+
+
 def test_parse_power_forecast_rejects_non_array() -> None:
     """A JSON object (not an array) raises ValueError."""
     payload = json.dumps({"ts": _now_iso(), "kw": 2.5})

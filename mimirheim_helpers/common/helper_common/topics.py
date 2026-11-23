@@ -337,6 +337,23 @@ def thermal_boiler_temp_topic(prefix: str, name: str) -> str:
     return f"{prefix}/input/thermal_boiler/{name}/temp_c"
 
 
+def thermal_boiler_draw_forecast_topic(prefix: str, name: str) -> str:
+    """Return the topic for a thermal boiler's hot water draw forecast.
+
+    Corresponds to ``thermal_boilers.{name}.inputs.topic_draw_forecast``. The
+    payload has the static-load forecast shape: ``[{ts, kw}]`` with ``kw`` the
+    average thermal draw over the interval starting at ``ts``.
+
+    Args:
+        prefix: The ``mqtt.topic_prefix`` value from mimirheim config.
+        name: The thermal boiler device name.
+
+    Returns:
+        e.g. ``"mimir/input/thermal_boiler/dhw_boiler/draw_forecast"``.
+    """
+    return f"{prefix}/input/thermal_boiler/{name}/draw_forecast"
+
+
 def space_heating_heat_needed_topic(prefix: str, name: str) -> str:
     """Return the topic for the space heating HP heat demand.
 

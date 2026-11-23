@@ -103,11 +103,14 @@ class ReadinessState:
         _entries: Maps MQTT topic → (validated_input, received_at).
         _sensor_topics: Set of sensor topics that must have been received at
             least once before a solve is permitted.
-        _forecast_topics: Set of PV/load topics that carry timestamped
-            forecast series and are required (intersection-based coverage).
-            Price topics are tracked separately in ``_prices_topics``.
+        _forecast_topics: Set of PV, load and thermal boiler draw topics that
+            carry timestamped forecast series and are required
+            (intersection-based coverage). Price topics are tracked
+            separately in ``_prices_topics``.
         _prices_topics: Topic strings for horizon prices, in priority order.
         _pv_topics: PV forecast topic per array, keyed by device name.
+        _draw_topics: Draw forecast topic per thermal boiler that uses one,
+            keyed by device name.
         _load_topics: Ordered list of static-load forecast topic strings.
         _current_strategy: The currently active strategy string.
         _strategy_topic: MQTT topic for strategy updates.
@@ -233,7 +236,16 @@ class ReadinessState:
         # Price topics are tracked separately (self._prices_topics): they use
         # union coverage and partial-source tolerance, unlike PV/load topics
         # which remain all-required and intersection-based.
-        self._forecast_topics: set[str] = set(self._pv_topics.values()) | set(self._load_topics)
+        # Thermal boiler draw forecasts: required and coverage-limiting like
+        # load forecasts, but only for tanks that use one.
+        self._draw_topics: dict[str, str] = {
+            name: cfg.inputs.topic_draw_forecast
+            for name, cfg in config.thermal_boilers.items()
+            if cfg.use_draw_forecast and cfg.inputs is not None and cfg.inputs.topic_draw_forecast is not None
+        }
+        self._forecast_topics: set[str] = (
+            set(self._pv_topics.values()) | set(self._load_topics) | set(self._draw_topics.values())
+        )
 
         # Deferrable load topics: window endpoints and optional start_time.
         # None of these block readiness — all are optional inputs.
@@ -718,8 +730,18 @@ class ReadinessState:
                 temp_entry = self._entries.get(cfg.inputs.topic_current_temp)
                 if temp_entry is None:
                     continue
+                draw_kw: list[float] | None = None
+                draw_forecast: list[PowerForecastStep] | None = None
+                draw_topic = self._draw_topics.get(name)
+                if draw_topic is not None:
+                    draw_entry = self._entries.get(draw_topic)
+                    if draw_entry is not None:
+                        draw_forecast = draw_entry[0]
+                        draw_kw = resample_power(draw_forecast, solve_start, n_steps)
                 thermal_boiler_inputs[name] = ThermalBoilerInputs(
                     current_temp_c=temp_entry[0],
+                    draw_kw=draw_kw,
+                    draw_forecast=draw_forecast,
                 )
 
             # Space heating inputs (plan 26): demand + optional BTM fields.

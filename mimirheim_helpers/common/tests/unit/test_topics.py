@@ -138,6 +138,13 @@ def test_thermal_boiler_temp_topic() -> None:
     assert topics.thermal_boiler_temp_topic("mimir", "dhw_boiler") == "mimir/input/thermal_boiler/dhw_boiler/temp_c"
 
 
+def test_thermal_boiler_draw_forecast_topic() -> None:
+    assert (
+        topics.thermal_boiler_draw_forecast_topic("mimir", "dhw_boiler")
+        == "mimir/input/thermal_boiler/dhw_boiler/draw_forecast"
+    )
+
+
 def test_space_heating_heat_needed_topic() -> None:
     assert (
         topics.space_heating_heat_needed_topic("mimir", "sh_hp")

@@ -97,6 +97,12 @@ def _clip_bundle(bundle: SolveBundle, max_steps: int) -> SolveBundle:
         if chp.get("outdoor_temp_forecast_c") is not None:
             chp["outdoor_temp_forecast_c"] = chp["outdoor_temp_forecast_c"][:max_steps]
 
+    # Per-step draws follow the horizon; the raw draw_forecast is kept whole
+    # so a model can read draws beyond the clipped horizon.
+    for tb in d["thermal_boiler_inputs"].values():
+        if tb.get("draw_kw") is not None:
+            tb["draw_kw"] = tb["draw_kw"][:max_steps]
+
     return SolveBundle.model_validate(d)
 
 
