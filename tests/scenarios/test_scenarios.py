@@ -96,3 +96,14 @@ def test_golden_scenario(
                     f"step={step.t} device={name!r}: "
                     f"{setpoint.soc_kwh} != {g_soc}"
                 )
+            g_temp = g_step.devices[name].planned_temp_c
+            if g_temp is None:
+                assert setpoint.planned_temp_c is None, (
+                    f"step={step.t} device={name!r}: "
+                    f"gained a planned temperature of {setpoint.planned_temp_c}"
+                )
+            else:
+                assert setpoint.planned_temp_c == pytest.approx(g_temp, abs=1e-3), (
+                    f"step={step.t} device={name!r}: "
+                    f"{setpoint.planned_temp_c} != {g_temp}"
+                )
