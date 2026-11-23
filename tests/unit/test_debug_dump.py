@@ -100,6 +100,11 @@ def _result() -> SolveResult:
                         on_off_active=True,
                         pv_is_curtailed=True,
                     ),
+                    "tank": DeviceSetpoint(
+                        kw=-3.0,
+                        type="thermal_boiler",
+                        planned_temp_c=48.5 + t,
+                    ),
                 },
             )
             for t in range(2)

@@ -627,3 +627,54 @@ def test_soc_credit_of_a_battery_follows_the_solver_soc() -> None:
     avg_price = sum(bundle.horizon_prices) / horizon
     assert result.soc_credit_eur == pytest.approx(avg_price * (end_soc - 2.0) * 0.9)
 
+
+
+def test_device_setpoint_planned_temp_c_defaults_to_none() -> None:
+    """DeviceSetpoint.planned_temp_c is None for devices that report no tank temperature."""
+    assert DeviceSetpoint(kw=1.0, type="static_load").planned_temp_c is None
+
+
+def test_thermal_boiler_setpoints_carry_the_planned_temperature() -> None:
+    """build_and_solve reports each step's planned tank temperature for thermal boilers only."""
+    from mimirheim.core.bundle import ThermalBoilerInputs
+
+    horizon = 4
+    config = MimirheimConfig.model_validate(
+        {
+            "mqtt": {"host": "localhost", "client_id": "test"},
+            "grid": {"import_limit_kw": 20.0, "export_limit_kw": 20.0},
+            "static_loads": {"base": {}},
+            "thermal_boilers": {
+                "dhw": {
+                    "volume_liters": 200.0,
+                    "elec_power_kw": 3.0,
+                    "setpoint_c": 55.0,
+                    "min_temp_c": 40.0,
+                    "cooling_rate_k_per_hour": 2.0,
+                }
+            },
+        }
+    )
+    bundle = SolveBundle(
+        solve_time_utc=datetime(2026, 6, 1, 12, tzinfo=timezone.utc),
+        horizon_prices=[0.25] * horizon,
+        horizon_export_prices=[0.10] * horizon,
+        horizon_confidence=[1.0] * horizon,
+        pv_forecast=[0.0] * horizon,
+        base_load_forecast=[1.0] * horizon,
+        thermal_boiler_inputs={"dhw": ThermalBoilerInputs(current_temp_c=50.0)},
+    )
+
+    result = build_and_solve(bundle, config)
+
+    assert result.solve_status in ("optimal", "feasible")
+    for step in result.schedule:
+        planned = step.devices["dhw"].planned_temp_c
+        assert planned is not None
+        assert 40.0 - 1e-6 <= planned <= 55.0 + 1e-6
+        assert step.devices["base"].planned_temp_c is None
+    assert result.schedule[0].devices["dhw"].planned_temp_c == pytest.approx(
+        50.0 - 2.0 * 0.25
+        + (3.0 * 0.25 / (200.0 * 4186 / 3600 / 1000)) * (1 if result.schedule[0].devices["dhw"].kw < 0 else 0),
+        abs=1e-6,
+    )

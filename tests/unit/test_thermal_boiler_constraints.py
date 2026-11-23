@@ -9,6 +9,8 @@ The default initial temperature is 45.0°C.
 """
 
 
+import pytest
+
 from mimirheim.config.schema import ThermalBoilerConfig
 from mimirheim.core.bundle import ThermalBoilerInputs
 from mimirheim.core.context import ModelContext
@@ -379,3 +381,26 @@ def test_boiler_terminal_value_prevents_unnecessary_drain() -> None:
     assert not isinstance(terminal, (int, float)), (
         "terminal_soc_var() must return a solver expression, not a plain number"
     )
+
+
+# ---------------------------------------------------------------------------
+# Planned temperature reader
+# ---------------------------------------------------------------------------
+
+
+def test_planned_temp_c_reads_the_end_of_step_tank_temperature() -> None:
+    """planned_temp_c(ctx, t) returns the solved tank temperature at the end of step t."""
+    ctx = _make_ctx(horizon=4)
+    device = ThermalBoilerDevice(name="boiler", config=_config())
+    device.add_variables(ctx)
+    device.add_constraints(ctx, inputs=_inputs(current_temp_c=45.0))
+    for t in ctx.T:
+        ctx.solver.add_constraint(device._heater_on[t] == (1 if t == 1 else 0))
+    ctx.solver.set_objective_minimize(0 * device._heater_on[0])
+    ctx.solver.solve()
+
+    rise = 3.0 * 1.0 * 0.25 / _thermal_cap(200.0)
+    drop = 2.0 * 0.25
+    expected = [45.0 - drop, 45.0 - 2 * drop + rise, 45.0 - 3 * drop + rise, 45.0 - 4 * drop + rise]
+    for t in ctx.T:
+        assert device.planned_temp_c(ctx, t) == pytest.approx(expected[t], abs=1e-6)

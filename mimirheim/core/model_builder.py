@@ -741,6 +741,7 @@ def build_and_solve(bundle: SolveBundle, config: MimirheimConfig) -> SolveResult
             device_setpoints[tb.name] = DeviceSetpoint(
                 kw=_eval_net_power(ctx, tb.net_power(t)),
                 type="thermal_boiler",
+                planned_temp_c=tb.planned_temp_c(ctx, t),
             )
         for sh in space_heating_hps:
             device_setpoints[sh.name] = DeviceSetpoint(

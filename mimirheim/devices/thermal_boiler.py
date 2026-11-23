@@ -177,6 +177,18 @@ class ThermalBoilerDevice:
                             self._heater_on[t + tau] >= self._start[t]
                         )
 
+    def planned_temp_c(self, ctx: ModelContext, t: int) -> float:
+        """Planned tank temperature at the end of step t after a solve, in °C.
+
+        Args:
+            ctx: The solved model context.
+            t: Zero-based time step index.
+
+        Returns:
+            The solved value of ``_T_tank[t]`` in degrees Celsius.
+        """
+        return float(ctx.solver.var_value(self._T_tank[t]))
+
     def net_power(self, t: int) -> Any:
         """Net AC power drawn from the home bus at step t, in kW.
 

@@ -494,6 +494,10 @@ class DeviceSetpoint(BaseModel):
         soc_kwh: Terminal state of charge in kWh at the end of this time step.
             Populated for storage devices (batteries, EV chargers, hybrid
             inverters) only. None for all other device types.
+        planned_temp_c: Planned store temperature in degrees Celsius at the
+            end of this time step. Populated for thermal boilers (and heat
+            stores) only. None for all other device types. A band-controlled
+            heater uses it as the temperature to heat to.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -506,6 +510,7 @@ class DeviceSetpoint(BaseModel):
     loadbalance_active: bool | None = None
     pv_is_curtailed: bool | None = None
     soc_kwh: float | None = None
+    planned_temp_c: float | None = None
 
 
 class ScheduleStep(BaseModel):

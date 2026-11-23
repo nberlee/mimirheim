@@ -61,7 +61,11 @@ _REPORTER_DISPLAYED_FIELDS: frozenset[str] = frozenset(
 # Each entry must have a comment explaining why.
 _REPORTER_EXPLICITLY_EXCLUDED_FIELDS: frozenset[str] = frozenset(
     {
-        # None currently.
+        # planned_temp_c is the planned tank temperature of a thermal boiler,
+        # published for band-controlled heaters. The reporter charts energy
+        # flows and storage SOC in kWh; it has no temperature axis, and the
+        # boiler's electricity already appears as load.
+        "planned_temp_c",
     }
 )
 
