@@ -53,13 +53,6 @@ class ThermalBoilerDevice:
             name: Device name, matching the key in ``MimirheimConfig.thermal_boilers``.
             config: Validated static configuration for this thermal boiler.
         """
-        if config.cooling_rate_k_per_hour is None:
-            # The standby loss dynamics are added in a later change of this
-            # feature; until then a tank configured with them is refused here
-            # rather than built without any loss.
-            raise NotImplementedError(
-                f"Thermal boiler {name!r}: the standby loss mode is not supported yet."
-            )
         self.name = name
         self.config = config
 
@@ -69,6 +62,9 @@ class ThermalBoilerDevice:
         # _start[t] = 1 when the heater transitions from off (t-1) to on (t).
         # Only populated when min_run_steps > 1.
         self._start: dict[int, Any] = {}
+        # Standby loss mode only: _shortfall[t] = kelvin below min_temp_c at
+        # the end of step t (soft floor). Empty for legacy tanks.
+        self._shortfall: dict[int, Any] = {}
 
         self._dt: float = 0.25  # set from ctx in add_variables
 
@@ -78,12 +74,15 @@ class ThermalBoilerDevice:
         For each time step t in ctx.T:
 
         - ``_T_tank[t]``: Water temperature at the end of step t, in degrees
-          Celsius. Lower bound: ``min_temp_c − 5`` (small numerical slack below
-          the hard bound, which is enforced as a constraint). Upper bound:
-          ``setpoint_c + 5`` (corresponding slack above the setpoint). These
-          loose variable bounds prevent the LP from becoming infeasible due to
-          numerical noise; the hard temperature bounds are enforced explicitly
-          in ``add_constraints``.
+          Celsius. Legacy mode: lower bound ``min_temp_c − 5`` (small numerical
+          slack below the hard bound, which is enforced as a constraint).
+          Standby mode: no fixed lower bound (-1e30), because a large draw can
+          take the tank far below the floor. Upper bound in both modes:
+          ``setpoint_c + 5`` (slack above the setpoint, which is enforced as a
+          constraint in ``add_constraints``).
+
+        - ``_shortfall[t]`` (standby mode only): kelvin below ``min_temp_c`` at
+          the end of step t, >= 0. Makes the floor soft.
 
         - ``_heater_on[t]``: Binary variable. 1 = the heating element or heat
           pump compressor is active during step t. 0 = off. The on/off state
@@ -105,15 +104,26 @@ class ThermalBoilerDevice:
         self._dt = ctx.dt
         cfg = self.config
 
+        standby = cfg.standby_loss_kw_per_k_value() is not None
         for t in ctx.T:
-            # T_tank[t]: tank temperature at the end of step t.
-            # A small slack on the bounds (±5°C) keeps the LP feasible under
-            # minor numerical noise while the real bounds are handled as
-            # explicit solver constraints in add_constraints.
-            self._T_tank[t] = ctx.solver.add_var(
-                lb=cfg.min_temp_c - 5.0,
-                ub=cfg.setpoint_c + 5.0,
-            )
+            if standby:
+                # T_tank[t] in °C, standby mode. No fixed lower bound: a large
+                # draw can take the tank well below the floor, which the soft
+                # floor below measures instead of forbidding.
+                self._T_tank[t] = ctx.solver.add_var(lb=-1e30, ub=cfg.setpoint_c + 5.0)
+                # shortfall[t]: kelvin the tank is below min_temp_c at the end
+                # of step t; zero whenever the floor holds. See
+                # IMPLEMENTATION_DETAILS.md §8, subsection "Soft tank floor".
+                self._shortfall[t] = ctx.solver.add_var(lb=0.0)
+            else:
+                # T_tank[t]: tank temperature at the end of step t.
+                # A small slack on the bounds (±5°C) keeps the LP feasible under
+                # minor numerical noise while the real bounds are handled as
+                # explicit solver constraints in add_constraints.
+                self._T_tank[t] = ctx.solver.add_var(
+                    lb=cfg.min_temp_c - 5.0,
+                    ub=cfg.setpoint_c + 5.0,
+                )
 
             # heater_on[t]: binary on/off for the heating element.
             self._heater_on[t] = ctx.solver.add_var(lb=0.0, ub=1.0, integer=True)
@@ -127,22 +137,33 @@ class ThermalBoilerDevice:
     def add_constraints(self, ctx: ModelContext, inputs: ThermalBoilerInputs) -> None:
         """Add all MILP constraints for this thermal boiler.
 
-        Adds, per step: the temperature dynamics equation (``T_tank[t] =
-        T_tank[t-1] - cool_per_step + heat_rise_per_step * heater_on[t]``,
-        with ``inputs.current_temp_c`` as the initial condition at ``t=0``),
-        hard bounds (``min_temp_c <= T_tank[t] <= setpoint_c``, enforced as
-        explicit constraints because the dynamics can otherwise push past
-        tightened variable bounds), and, when ``min_run_steps > 1``, the
-        minimum run-time constraint. See IMPLEMENTATION_DETAILS.md §8,
-        subsection "Thermal boiler and DHW tank dynamics", for the tank model
-        derivation and the start-sentinel run-length mechanism.
+        Legacy mode adds, per step: the temperature dynamics equation
+        (``T_tank[t] = T_tank[t-1] - cool_per_step + heat_rise_per_step *
+        heater_on[t]``, with ``inputs.current_temp_c`` as the initial condition
+        at ``t=0``) and hard bounds (``min_temp_c <= T_tank[t] <= setpoint_c``,
+        enforced as explicit constraints because the dynamics can otherwise
+        push past tightened variable bounds). Standby mode replaces these with
+        the standby-loss dynamics, the per-step draw, a soft floor and the
+        hard setpoint cap (see ``_add_standby_constraints``). Both modes add,
+        when ``min_run_steps > 1``, the minimum run-time constraint. See
+        IMPLEMENTATION_DETAILS.md §8, subsections "Thermal boiler and DHW tank
+        dynamics" and "Soft tank floor".
 
         Args:
             ctx: The current solve context.
-            inputs: Live temperature reading for this boiler. ``current_temp_c``
-                is the initial tank temperature for the first step.
+            inputs: Live readings for this boiler. ``current_temp_c`` is the
+                initial tank temperature for the first step; ``draw_kw`` the
+                per-step draw for a tank that uses a draw forecast.
+
+        Raises:
+            ValueError: If the tank uses a draw forecast and ``inputs.draw_kw``
+                is missing.
         """
         cfg = self.config
+        if cfg.standby_loss_kw_per_k_value() is not None:
+            self._add_standby_constraints(ctx, inputs)
+            self._add_min_run_constraints(ctx)
+            return
 
         # Thermal parameters derived from static config (plain floats, not
         # solver variables): cool_per_step is the unconditional temperature
@@ -168,6 +189,85 @@ class ThermalBoilerDevice:
             ctx.solver.add_constraint(self._T_tank[t] >= cfg.min_temp_c)
             ctx.solver.add_constraint(self._T_tank[t] <= cfg.setpoint_c)
 
+        self._add_min_run_constraints(ctx)
+
+    def _add_standby_constraints(self, ctx: ModelContext, inputs: ThermalBoilerInputs) -> None:
+        """Add standby-mode dynamics, the soft floor and the setpoint cap.
+
+        Per step, the tank gains the heater's heat and loses the standby loss
+        (proportional to its temperature above the room) and the forecast
+        draw:
+
+            T[t] = T[t-1] + (P_heat * on[t] - L * (T[t-1] - T_room) - draw[t]) * dt / cap
+
+        The loss uses the start-of-step temperature, so the equation stays
+        linear. The floor is soft: ``T[t] >= min_temp_c - shortfall[t]``.
+        See IMPLEMENTATION_DETAILS.md §8, subsections "Thermal boiler and DHW
+        tank dynamics" and "Soft tank floor".
+
+        Args:
+            ctx: The current solve context.
+            inputs: Live readings: ``current_temp_c`` and, with a draw
+                forecast, ``draw_kw`` per step.
+
+        Raises:
+            ValueError: If the tank uses a draw forecast and ``draw_kw`` is
+                missing.
+        """
+        cfg = self.config
+        if cfg.use_draw_forecast and inputs.draw_kw is None:
+            raise ValueError(
+                f"Thermal boiler {self.name!r} uses a draw forecast but the bundle has no draw_kw."
+            )
+        loss_kw_per_k = cfg.standby_loss_kw_per_k_value()
+        assert loss_kw_per_k is not None and cfg.ambient_temp_c is not None
+        thermal_cap_kwh_per_k = cfg.volume_liters * _WATER_THERMAL_CAP_KWH_PER_LITRE_K
+        # k_per_kwh: temperature change in K per kWh of heat added or removed.
+        k_per_kwh = 1.0 / thermal_cap_kwh_per_k
+        heat_kw = cfg.elec_power_kw * cfg.cop
+
+        for t in ctx.T:
+            prior: Any = inputs.current_temp_c if t == 0 else self._T_tank[t - 1]
+            # Draws only for tanks that use the forecast; a bundle may carry
+            # draw_kw for a tank whose forecast has since been switched off.
+            draw_kw = inputs.draw_kw[t] if cfg.use_draw_forecast and inputs.draw_kw is not None else 0.0
+            # Tank temperature after heating, standby loss and draw in step t.
+            ctx.solver.add_constraint(
+                self._T_tank[t]
+                == prior
+                + (
+                    heat_kw * self._heater_on[t]
+                    - loss_kw_per_k * (prior - cfg.ambient_temp_c)
+                    - draw_kw
+                )
+                * ctx.dt
+                * k_per_kwh
+            )
+            # Soft floor: shortfall[t] covers any dip below min_temp_c.
+            ctx.solver.add_constraint(self._T_tank[t] >= cfg.min_temp_c - self._shortfall[t])
+            # Hard cap at the setpoint, as in legacy mode.
+            ctx.solver.add_constraint(self._T_tank[t] <= cfg.setpoint_c)
+
+    def floor_shortfall_kh(self, ctx: ModelContext) -> Any | None:
+        """Total time-weighted dip below ``min_temp_c``, in K·h, or None for legacy tanks.
+
+        Args:
+            ctx: The current solve context.
+
+        Returns:
+            Solver expression ``sum(shortfall[t] * dt)``, or None when the
+            tank has a hard floor (legacy cooling-rate mode).
+        """
+        if not self._shortfall:
+            return None
+        total: Any = 0.0
+        for t in ctx.T:
+            total = total + self._shortfall[t] * ctx.dt
+        return total
+
+    def _add_min_run_constraints(self, ctx: ModelContext) -> None:
+        """Add the minimum run-length constraints on ``_heater_on``."""
+        cfg = self.config
         # Minimum run length (e.g. a compressor that must run in blocks). See
         # IMPLEMENTATION_DETAILS.md §8, subsection "Thermal boiler and DHW
         # tank dynamics", for the start-sentinel mechanism.

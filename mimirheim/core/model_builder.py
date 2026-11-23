@@ -502,6 +502,11 @@ def build_and_solve(bundle: SolveBundle, config: MimirheimConfig) -> SolveResult
                 f"bundle.thermal_boiler_inputs."
             )
         tb.add_constraints(ctx, inputs=tb_inputs)
+        # Standby tanks model a soft floor; this solve holds it hard by
+        # keeping their total shortfall at zero.
+        shortfall_kh = tb.floor_shortfall_kh(ctx)
+        if shortfall_kh is not None:
+            ctx.solver.add_constraint(shortfall_kh <= 0.0)
 
     for sh in space_heating_hps:
         sh_inputs = bundle.space_heating_inputs.get(sh.name)

@@ -249,23 +249,26 @@ This enforces that at every time step, total production equals total consumption
 
 ## Thermal boiler and DHW tank dynamics
 
-`ThermalBoilerDevice` and the DHW portion of `CombiHeatPumpDevice` share the same first-order lumped-capacitance tank model. Tank temperature at each step is a decision variable bounded by the configured safety limits:
+`ThermalBoilerDevice` and the DHW portion of `CombiHeatPumpDevice` model the tank as one well-mixed temperature `T_tank[t]` (°C at the end of step `t`), with `current_temp_c` from the MQTT sensor as the start value. Let `cap = V * c_p` be the thermal capacity in kWh/K, with `V` the volume in litres and `c_p = 0.001163` kWh/(litre·K). The heater is a binary `on[t]` delivering `P_heat = elec_power_kw * cop` kW of heat while on.
+
+A thermal boiler uses one of two loss modes (exactly one is configured):
+
+**Legacy cooling rate** (`cooling_rate_k_per_hour`). Standby loss and typical draws are lumped into a constant temperature drop:
 
 ```
-T_tank[t] ∈ [min_temp_c, max_temp_c]
+T_tank[t] = T_tank[t-1] - cooling_rate_k_per_hour * dt + P_heat * dt / cap * on[t]
+min_temp_c <= T_tank[t] <= setpoint_c          (hard, as explicit constraints)
 ```
 
-The tank dynamics are modelled as a discrete-time energy balance. Let $V$ be the tank volume (litres), $c_p = 0.001163$ kWh/(litre·K) be the specific heat of water, and $L$ be the heat loss coefficient (kW/K):
+**Standby loss** (`standby_loss_w` or `standby_loss_kw_per_k`, with `ambient_temp_c`). The loss is proportional to the tank's temperature above the room, and an optional draw forecast is subtracted per step (`draw_kw[t]`, kW thermal; 0 without a draw forecast). `standby_loss_w` is the datasheet standing loss measured at a 45 K difference and converts as `L = W / 45 / 1000` kW/K:
 
-$$T_{tank}[t] = T_{tank}[t-1] + \frac{\Delta t}{V \cdot c_p} \left( P_{heat}[t] - L \cdot (T_{tank}[t-1] - T_{amb}) \right)$$
+```
+T_tank[t] = T_tank[t-1] + (P_heat * on[t] - L * (T_tank[t-1] - ambient_temp_c) - draw_kw[t]) * dt / cap
+T_tank[t] >= min_temp_c - shortfall[t]          (soft floor, see "Soft tank floor")
+T_tank[t] <= setpoint_c                         (hard)
+```
 
-This is linearised by moving all $T_{tank}$ terms to the left:
-
-$$T_{tank}[t] - \alpha \cdot T_{tank}[t-1] = \frac{\Delta t}{V \cdot c_p} \cdot P_{heat}[t] + \beta_{loss}$$
-
-where $\alpha = 1 - \Delta t \cdot L / (V \cdot c_p)$ is the heat retention factor and $\beta_{loss}$ encodes the ambient heat loss term. The initial condition uses `current_temp_c` from the MQTT sensor reading.
-
-The element/boiler is controlled by a binary variable `on[t]`. When on, `P_heat[t] = element_power_kw * cop`. A minimum run-time constraint (if `min_run_steps > 0`) links consecutive `on[t]` values via a Big-M constraint that requires at least `min_run_steps` of operation once switched on, preventing unrealistic short cycling.
+The loss uses the start-of-step temperature, which keeps the equation linear (an explicit Euler step; at 15-minute steps and a typical tank the loss changes the temperature by well under 0.1 K per step, so the error is negligible).
 
 **Minimum run-time via a start sentinel** (used whenever `min_run_steps > 1`). A binary `start[t]` detects the off-to-on transition and propagates the run length forward:
 
@@ -282,6 +285,12 @@ on[t+τ]  >= start[t]   for τ in 1..min_run_steps-1, where t+τ < horizon
 - *Preventing fresh starts too close to the horizon end.* Without an extra guard, the solver could start a fresh run in the last step or two of the horizon: with no future steps left to constrain, the sentinel inequalities are trivially satisfied by a single-step run, defeating the minimum-run-length guarantee. For every step `t` where `t + min_run_steps > horizon` (a start here could not complete the required run inside the horizon), the constraint set adds `on[t] <= on[t-1]` (no fresh start allowed — the device may still continue a run already in progress) or, at `t=0` specifically, `on[0] == 0` (there is no prior step to continue from, so a run cannot even be in progress).
 
 - *Propagating a `t=0` start explicitly.* `start[t]` is only defined for `t >= 1` (it compares against `t-1`), so the sentinel loop alone does not constrain what happens if the device is already on at `t=0` (e.g. still running from the previous solve cycle, short of the minimum run length). A direct constraint `on[tau] >= on[0]` for `tau` in `1 .. min_run_steps-1` propagates a `t=0` start forward, mirroring what the sentinel enforces for a start at any other step.
+
+### Soft tank floor
+
+In standby mode the floor `min_temp_c` is soft, because a forecast hot water draw can exceed what the heater can supply in time (a long shower), and a hard floor would then make the whole solve infeasible, leaving every device without a plan. In practice the appliance also starts heating by itself during such a draw, so a brief dip below the floor is physical.
+
+`shortfall[t] >= 0` (K) measures the dip, and `T_tank[t]` has no fixed lower bound in this mode (a large draw can take the tank more than a few kelvin below the floor). `floor_shortfall_kh` returns `sum(shortfall[t] * dt)` in K·h. `build_and_solve` currently holds that total at zero, which is exactly the hard floor; legacy tanks have no shortfall variables at all.
 
 ## Space heating heat pump model
 
