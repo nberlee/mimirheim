@@ -589,6 +589,12 @@ Published retained for each device in the current step (`t=0`):
 {"kw": -2.4, "type": "battery"}
 ```
 
+A thermal boiler's payload also carries `planned_temp_c`, the tank temperature in °C that the plan expects at the end of the step, rounded to two decimals. A heater controlled by a temperature band (for example a heat pump's hot water setpoint) can use it as the temperature to heat to. The key is omitted when no planned temperature is available:
+
+```json
+{"kw": -3.0, "type": "thermal_boiler", "planned_temp_c": 51.42}
+```
+
 HA automations can subscribe directly to `mimirheim/device/home_battery/setpoint` rather than parsing the full schedule JSON.
 
 ### `outputs.last_solve`
@@ -1193,7 +1199,7 @@ Discovery payloads are published retained on every broker connection. The follow
 |---|---|---|---|---|
 | `{device_name} Grid Forecast` | sensor (power) | `outputs.current` | `grid_import_kw - grid_export_kw` (net, positive = import) | `forecast` — array of `{import, export}` per step (kW, 3 dp) |
 | `{device_name} Solve Status` | sensor | `outputs.last_solve` | `status` | — |
-| `{device_name} {device_name} setpoint` | sensor (power) | `{prefix}/device/{name}/setpoint` | `kw` | `forecast` — array of `{kw}` per step (storage devices: also `soc_kwh`) |
+| `{device_name} {device_name} setpoint` | sensor (power) | `{prefix}/device/{name}/setpoint` | `kw` | `forecast` — array of `{kw}` per step (storage devices: also `soc_kwh`; thermal boilers: also `planned_temp_c`) |
 
 The last row is repeated for every configured device across all device sections.
 
@@ -1206,6 +1212,10 @@ Every setpoint sensor and the grid sensor carry a `forecast` JSON attribute deri
 For battery and EV charger setpoint sensors, each entry contains:
 - `kw` — scheduled power in kW (negative = charging, positive = discharging)
 - `soc_kwh` — terminal state of charge in kWh at the end of the step
+
+For thermal boiler setpoint sensors, each entry contains:
+- `kw`: scheduled power in kW (negative = heating)
+- `planned_temp_c`: planned tank temperature in °C at the end of the step (2 dp), or `null` when unavailable
 
 For all other device setpoint sensors, each entry contains only `kw`. For the grid sensor, each entry contains `import` and `export` (both in kW, rounded to 3 decimal places).
 
