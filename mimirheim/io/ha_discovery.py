@@ -199,6 +199,19 @@ def publish_discovery(client: Any, config: MimirheimConfig) -> None:
                 "{%- endfor -%}"
                 '{{ {"forecast": ns.f} | tojson }}'
             )
+        elif device_name in config.thermal_boilers:
+            # The planned tank temperature is an attribute of the setpoint
+            # sensor, not a separate temperature entity: the measured tank
+            # temperature is already a Home Assistant entity of its own.
+            attr_template = (
+                "{%- set ns = namespace(f=[]) -%}"
+                "{%- for s in value_json.schedule -%}"
+                f'{{%- set p = s.devices["{device_name}"].planned_temp_c | default(none) -%}}'
+                f'{{%- set ns.f = ns.f + [{{"kw": s.devices["{device_name}"].kw | round(3), '
+                '"planned_temp_c": (p | round(2)) if p is not none else none, "ts": s.ts}] -%}'
+                "{%- endfor -%}"
+                '{{ {"forecast": ns.f} | tojson }}'
+            )
         else:
             attr_template = (
                 "{%- set ns = namespace(f=[]) -%}"

@@ -2042,3 +2042,45 @@ def test_published_load_types_match_the_reporter() -> None:
     this keeps the two lists from drifting apart.
     """
     assert _LOAD_TYPES == REPORTER_LOAD_TYPES
+
+
+def _publish_thermal_boiler_step(planned_temp_c: float | None) -> MagicMock:
+    """Publish one step with a thermal boiler and a static load."""
+    from mimirheim.config.schema import ThermalBoilerConfig
+
+    base = _make_config()
+    tank = ThermalBoilerConfig(
+        volume_liters=200.0, elec_power_kw=2.0, setpoint_c=55.0, min_temp_c=40.0,
+        cooling_rate_k_per_hour=1.0,
+    )
+    config = base.model_copy(update={"thermal_boilers": {"tank": tank}})
+    step = ScheduleStep(
+        t=0,
+        grid_import_kw=2.0,
+        grid_export_kw=0.0,
+        devices={
+            "tank": DeviceSetpoint(kw=-2.0, type="thermal_boiler", planned_temp_c=planned_temp_c),
+            "base": DeviceSetpoint(kw=-0.5, type="static_load"),
+        },
+    )
+    result = SolveResult(
+        strategy="minimize_cost", objective_value=0.0, solve_status="optimal", schedule=[step]
+    )
+    client = MagicMock()
+    MqttPublisher(client=client, config=config).publish_result(result)
+    return client
+
+
+def test_thermal_boiler_setpoint_carries_planned_temp_c() -> None:
+    """The setpoint payload of a thermal boiler includes the planned tank temperature."""
+    client = _publish_thermal_boiler_step(48.6789)
+    assert _published(client, "mimir/device/tank/setpoint") == {
+        "kw": -2.0, "type": "thermal_boiler", "planned_temp_c": 48.68,
+    }
+    assert "planned_temp_c" not in _published(client, "mimir/device/base/setpoint")
+
+
+def test_thermal_boiler_setpoint_omits_absent_planned_temp_c() -> None:
+    """Without a planned temperature the key is left out rather than published as null."""
+    client = _publish_thermal_boiler_step(None)
+    assert _published(client, "mimir/device/tank/setpoint") == {"kw": -2.0, "type": "thermal_boiler"}

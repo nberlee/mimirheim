@@ -260,9 +260,18 @@ class MqttPublisher:
             # answerable in one place.
             prefix = self._config.mqtt.topic_prefix
             for device_name, setpoint in current.devices.items():
+                payload: dict[str, Any] = {
+                    "kw": self._setpoint_kw(device_name, setpoint),
+                    "type": setpoint.type,
+                }
+                # A thermal boiler also reports the tank temperature planned
+                # for the end of the step, which a band-controlled heater
+                # uses as its target. Left out, rather than null, when absent.
+                if setpoint.type == "thermal_boiler" and setpoint.planned_temp_c is not None:
+                    payload["planned_temp_c"] = round(setpoint.planned_temp_c, 2)
                 self._client.publish(
                     f"{prefix}/device/{device_name}/setpoint",
-                    json.dumps({"kw": self._setpoint_kw(device_name, setpoint), "type": setpoint.type}),
+                    json.dumps(payload),
                     qos=1,
                     retain=True,
                 )

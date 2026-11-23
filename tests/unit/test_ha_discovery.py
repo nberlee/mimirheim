@@ -1219,3 +1219,31 @@ class TestForecastTemplateRendering:
         result = _render_template(template_str, payload)
 
         assert result == {"forecast": []}
+
+
+class TestThermalBoilerPlannedTemperatureAttribute:
+    """The thermal boiler setpoint sensor exposes the planned tank temperature."""
+
+    def _template(self) -> str:
+        components = _publish_and_get_components(_make_config_new_devices())
+        uid = next(k for k in components if "dhw_boiler" in k and k.endswith("_setpoint_kw"))
+        return components[uid]["json_attributes_template"]
+
+    def test_template_references_planned_temp_c(self) -> None:
+        assert "planned_temp_c" in self._template()
+
+    def test_template_renders_planned_temp_c_per_step(self) -> None:
+        schedule = _make_mock_schedule(n_steps=2)
+        for i, step in enumerate(schedule["schedule"]):
+            step["devices"]["dhw_boiler"] = {
+                "kw": -2.0, "type": "thermal_boiler", "planned_temp_c": 50.123 + i,
+            }
+        out = _render_template(self._template(), schedule)
+        assert [f["planned_temp_c"] for f in out["forecast"]] == [50.12, 51.12]
+        assert [f["kw"] for f in out["forecast"]] == [-2.0, -2.0]
+
+    def test_template_renders_without_planned_temp_c(self) -> None:
+        schedule = _make_mock_schedule(n_steps=1)
+        schedule["schedule"][0]["devices"]["dhw_boiler"] = {"kw": 0.0, "type": "thermal_boiler"}
+        out = _render_template(self._template(), schedule)
+        assert out["forecast"][0]["planned_temp_c"] is None
