@@ -9,6 +9,7 @@
 #   pv_fetcher       trigger_topic: mimir/input/tools/pv/trigger
 #   nordpool         trigger_topic: mimir/input/tools/prices/trigger
 #   baseload_ha      trigger_topic: mimir/input/tools/baseload/trigger
+#   hot_water_draw   trigger_topic: mimir/input/tools/hot_water/trigger
 #   mimirheim             listens on:    mimir/input/trigger
 #
 # This file is for a single-prefix deployment. If you use a custom
@@ -61,6 +62,13 @@ schedules:
   # profile at the start of each new day.
   # ---------------------------------------------------------------------------
   - "50 23 * * *": mimir/input/tools/baseload/trigger
+
+  # ---------------------------------------------------------------------------
+  # Hot water draw forecast (hot_water_draw)
+  #
+  # Draw habits change slowly. One estimate per day keeps the profile current.
+  # ---------------------------------------------------------------------------
+  - "55 23 * * *": mimir/input/tools/hot_water/trigger
 
   # ---------------------------------------------------------------------------
   # mimirheim solve cycle

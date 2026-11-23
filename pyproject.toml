@@ -72,6 +72,18 @@ baseload-ha-db-postgres = [
 baseload-ha-db-mysql = [
     "pymysql>=1.2.4",
 ]
+hot-water-draw = [
+    "sqlalchemy>=2.1.8",
+    # zoneinfo needs a time zone database; the container base image ships one,
+    # other installs (notably Windows) may not.
+    "tzdata>=2024.1",
+]
+hot-water-draw-postgres = [
+    "psycopg2-binary>=2.9.13",
+]
+hot-water-draw-mysql = [
+    "pymysql>=1.2.4",
+]
 reporter = [
     "plotly>=7.1.0",
 ]
@@ -92,6 +104,7 @@ helpers = [
     "mimirheim[pv-ml-learner]",
     "mimirheim[baseload-ha]",
     "mimirheim[baseload-ha-db]",
+    "mimirheim[hot-water-draw]",
     "mimirheim[reporter]",
     "mimirheim[config-editor]",
 ]

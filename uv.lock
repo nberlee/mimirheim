@@ -638,8 +638,19 @@ helpers = [
     { name = "requests" },
     { name = "scikit-learn" },
     { name = "sqlalchemy" },
+    { name = "tzdata" },
     { name = "xgboost", marker = "sys_platform == 'darwin'" },
     { name = "xgboost-cpu", marker = "sys_platform != 'darwin'" },
+]
+hot-water-draw = [
+    { name = "sqlalchemy" },
+    { name = "tzdata" },
+]
+hot-water-draw-mysql = [
+    { name = "pymysql" },
+]
+hot-water-draw-postgres = [
+    { name = "psycopg2-binary" },
 ]
 nordpool = [
     { name = "pynordpool" },
@@ -702,6 +713,7 @@ requires-dist = [
     { name = "mimirheim", extras = ["baseload-ha-db"], marker = "extra == 'helpers'" },
     { name = "mimirheim", extras = ["config-editor"], marker = "extra == 'helpers'" },
     { name = "mimirheim", extras = ["epexpredictor"], marker = "extra == 'helpers'" },
+    { name = "mimirheim", extras = ["hot-water-draw"], marker = "extra == 'helpers'" },
     { name = "mimirheim", extras = ["nordpool"], marker = "extra == 'helpers'" },
     { name = "mimirheim", extras = ["pv-fetcher"], marker = "extra == 'helpers'" },
     { name = "mimirheim", extras = ["pv-ml-learner"], marker = "extra == 'helpers'" },
@@ -716,9 +728,11 @@ requires-dist = [
     { name = "pandas", marker = "extra == 'pv-ml-learner'", specifier = ">=3.1.1" },
     { name = "plotly", marker = "extra == 'reporter'", specifier = ">=7.1.0" },
     { name = "psycopg2-binary", marker = "extra == 'baseload-ha-db-postgres'", specifier = ">=2.9.13" },
+    { name = "psycopg2-binary", marker = "extra == 'hot-water-draw-postgres'", specifier = ">=2.9.13" },
     { name = "psycopg2-binary", marker = "extra == 'pv-ml-learner-postgres'", specifier = ">=2.9.13" },
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "pymysql", marker = "extra == 'baseload-ha-db-mysql'", specifier = ">=1.2.4" },
+    { name = "pymysql", marker = "extra == 'hot-water-draw-mysql'", specifier = ">=1.2.4" },
     { name = "pymysql", marker = "extra == 'pv-ml-learner-mysql'", specifier = ">=1.2.4" },
     { name = "pynordpool", marker = "extra == 'nordpool'", specifier = ">=0.4.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
@@ -726,11 +740,13 @@ requires-dist = [
     { name = "requests", marker = "extra == 'zonneplan'", specifier = ">=2.34.2" },
     { name = "scikit-learn", marker = "extra == 'pv-ml-learner'", specifier = ">=1.9.1" },
     { name = "sqlalchemy", marker = "extra == 'baseload-ha-db'", specifier = ">=2.1.8" },
+    { name = "sqlalchemy", marker = "extra == 'hot-water-draw'", specifier = ">=2.1.8" },
     { name = "sqlalchemy", marker = "extra == 'pv-ml-learner'", specifier = ">=2.1.8" },
+    { name = "tzdata", marker = "extra == 'hot-water-draw'", specifier = ">=2024.1" },
     { name = "xgboost", marker = "sys_platform == 'darwin' and extra == 'pv-ml-learner'", specifier = ">=3.4.1" },
     { name = "xgboost-cpu", marker = "sys_platform != 'darwin' and extra == 'pv-ml-learner'", specifier = ">=3.4.1" },
 ]
-provides-extras = ["scheduler", "nordpool", "zonneplan", "epexpredictor", "pv-fetcher", "pv-openmeteo", "pv-ml-learner", "pv-ml-learner-postgres", "pv-ml-learner-mysql", "baseload-ha", "baseload-ha-db", "baseload-ha-db-postgres", "baseload-ha-db-mysql", "reporter", "config-editor", "helpers"]
+provides-extras = ["scheduler", "nordpool", "zonneplan", "epexpredictor", "pv-fetcher", "pv-openmeteo", "pv-ml-learner", "pv-ml-learner-postgres", "pv-ml-learner-mysql", "baseload-ha", "baseload-ha-db", "baseload-ha-db-postgres", "baseload-ha-db-mysql", "hot-water-draw", "hot-water-draw-postgres", "hot-water-draw-mysql", "reporter", "config-editor", "helpers"]
 
 [package.metadata.requires-dev]
 dev = [

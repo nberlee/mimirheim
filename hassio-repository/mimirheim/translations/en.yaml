@@ -40,6 +40,11 @@ configuration:
     description: >-
       Start the static baseload profile publisher. Requires baseload-static.yaml
       in the add-on config directory.
+  enable_hot_water_draw:
+    name: Enable Hot water draw
+    description: >-
+      Start the hot water draw forecast for a thermal boiler (Home Assistant
+      database). Requires hot-water-draw.yaml in the add-on config directory.
   enable_scheduler:
     name: Enable Scheduler
     description: >-

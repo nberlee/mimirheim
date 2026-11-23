@@ -1,0 +1,89 @@
+# Example configuration for the hot water draw forecast helper.
+#
+# This tool reads the tank temperature sensors and the energy counters of the
+# tank's heat sources from the Home Assistant recorder database, estimates how
+# much hot water the household draws per day and at which hours, and publishes
+# an hourly draw forecast for a mimirheim thermal boiler that has
+# use_draw_forecast: true (with the standby loss mode). Any database backend
+# supported by HA (SQLite, PostgreSQL, MariaDB) works via a SQLAlchemy URL.
+#
+# The tank temperature sensors need long-term statistics in Home Assistant
+# (state_class: measurement), and the energy counters need state_class total
+# or total_increasing.
+
+mqtt:
+  # MQTT broker connection settings.
+  host: localhost
+  port: 1883
+  client_id: mimir-hot-water-draw
+  username: mqtt_user
+  password: mqtt_password
+
+# Must match mqtt.topic_prefix in the mimirheim configuration.
+# mimir_topic_prefix: mimir  # default
+
+# The thermal_boilers device name in the mimirheim configuration. The output
+# topic is derived from it: mimir/input/thermal_boiler/<name>/draw_forecast
+mimir_thermal_boiler_name: dhw
+
+# MQTT topic that triggers one estimate. Defaults to:
+# trigger_topic: mimir/input/tools/hot_water/trigger
+
+# Publish an empty message to the mimirheim trigger topic after each forecast,
+# so mimirheim solves with the new draws at once.
+# signal_mimir: false  # default
+
+# Optional retained diagnostics of each estimate (daily draw, samples, ...).
+# quality_topic: mimir/status/hot_water_draw/quality
+
+homeassistant:
+  # SQLAlchemy URL for the Home Assistant recorder database. SQLite files are
+  # always opened read-only.
+  #
+  # SQLite in the mimirheim Home Assistant add-on, which mounts the Home
+  # Assistant config directory read-only at /homeassistant:
+  #   db_url: sqlite:////homeassistant/home-assistant_v2.db
+  #
+  # SQLite in a plain container: mount the Home Assistant config directory
+  # yourself and point at it, for example:
+  #   db_url: sqlite:////ha-config/home-assistant_v2.db
+  #
+  # PostgreSQL / MariaDB: install the matching driver extra:
+  #   uv pip install "mimirheim[hot-water-draw-postgres]"
+  #   uv pip install "mimirheim[hot-water-draw-mysql]"
+  db_url: sqlite:////homeassistant/home-assistant_v2.db
+
+  # Tank temperature sensors; their hourly means are averaged. A top and a
+  # lower sensor together describe a stratified tank better than either alone.
+  tank_temperature_entities:
+    - entity_id: sensor.dhw_tank_top_temperature
+    - entity_id: sensor.dhw_tank_lower_temperature
+
+  # Every heat source of the tank with its electric energy counter and the
+  # heat it delivers per kWh of electricity. An hour counts as known only
+  # when every source has a value for it.
+  heat_sources:
+    - energy_entity: sensor.dhw_compressor_energy
+      cop: 2.5          # average domestic hot water COP of the heat pump
+    - energy_entity: sensor.dhw_element_energy
+      cop: 1.0          # resistive element
+
+tank:
+  volume_liters: 180
+  # Standing loss from the tank's datasheet or energy label (ErP value "S",
+  # measured at a 45 K tank-to-room difference). Alternatively set
+  # standby_loss_kw_per_k. Use the same value as in mimirheim's thermal boiler.
+  standby_loss_w: 90
+  # Temperature of the room around the tank.
+  ambient_temp_c: 18
+
+model:
+  timezone: Europe/Amsterdam
+  # Days of history used; recent days can be weighted more with lookback_decay.
+  lookback_days: 14
+  # lookback_decay: 1.0          # 1.0 = every day weighs the same
+  # min_samples_per_hour: 3      # samples an hour of day needs for its own value
+  # heating_threshold_kwh: 0.01  # hourly energy above which a source is heating
+  # Daily draw (kWh of heat) used until there is enough history.
+  fallback_daily_draw_kwh: 6.0
+  # horizon_hours: 168

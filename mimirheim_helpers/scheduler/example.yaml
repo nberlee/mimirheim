@@ -67,6 +67,13 @@ schedules:
   - "0 0 * * *":    mimir/input/tools/baseload/trigger
 
   # -------------------------------------------------------------------------
+  # Hot water draw forecast (hot_water_draw)
+  # Draw habits change slowly; once daily is sufficient.
+  # Tool trigger_topic: mimir/input/tools/hot_water/trigger
+  # -------------------------------------------------------------------------
+  - "5 0 * * *":    mimir/input/tools/hot_water/trigger
+
+  # -------------------------------------------------------------------------
   # mimirheim solve cycle
   # Solve every 15 minutes. mimirheim only solves when all readiness conditions are
   # met; a trigger that arrives before inputs are ready is silently discarded.

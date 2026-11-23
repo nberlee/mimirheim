@@ -1,0 +1,9 @@
+#!/command/with-contenv sh
+exec 2>&1
+if [ "${ENABLE_HOT_WATER_DRAW}" != "true" ]; then
+    echo "hot-water-draw: disabled (set ENABLE_HOT_WATER_DRAW=true to enable)"
+    /command/s6-svc -d /run/service/hot-water-draw
+    exit 0
+fi
+CONFIG=/config/hot-water-draw.yaml
+exec /app/.venv/bin/python -m hot_water_draw --config "$CONFIG"

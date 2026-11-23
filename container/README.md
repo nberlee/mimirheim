@@ -36,13 +36,14 @@ down (see [Enabling services](#enabling-services-enable_service) below).
 | `baseload-ha` | `ENABLE_BASELOAD_HA` | `/config/baseload-ha.yaml` | `baseload_ha` |
 | `baseload-ha-db` | `ENABLE_BASELOAD_HA_DB` | `/config/baseload-ha-db.yaml` | `baseload_ha_db` |
 | `baseload-static` | `ENABLE_BASELOAD_STATIC` | `/config/baseload-static.yaml` | `baseload_static` |
+| `hot-water-draw` | `ENABLE_HOT_WATER_DRAW` | `/config/hot-water-draw.yaml` | `hot_water_draw` |
 | `reporter` | `ENABLE_REPORTER` | `/config/reporter.yaml` | `reporter` |
 
 ### Enabling services (`ENABLE_<SERVICE>`)
 
 A service's `ENABLE_<SERVICE>` variable must equal the literal string
 `"true"` for it to start at all; unset, `"false"`, or any other value
-leaves it down. There is no default-enabled fallback for any of the 12
+leaves it down. There is no default-enabled fallback for any of the 13
 gated services — `mimirheim` itself is the only exception, and always
 runs. See [wiki: Environment Variables](https://github.com/jsimonetti/mimirheim/wiki/Environment-Variables)
 for the full reference, including the equivalent `MQTT_*` variables that

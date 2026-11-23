@@ -350,6 +350,16 @@ def _build_targets(root: Path) -> list[Target]:
             ),
         ),
         Target(
+            key="hot-water-draw",
+            source_path=helpers / "hot_water" / "homeassistant_db" / "hot_water_draw" / "config.py",
+            output_path=ref / "Config-Hot-Water-Draw.md",
+            title="hot_water_draw: Configuration Reference",
+            intro=(
+                "Auto-generated from `hot_water_draw/config.py`. "
+                "See [Hot-Water-Draw](Hot-Water-Draw) for the guide."
+            ),
+        ),
+        Target(
             key="baseload-ha",
             source_path=helpers / "baseload" / "homeassistant" / "baseload_ha" / "config.py",
             output_path=ref / "Config-Baseload-HA.md",

@@ -39,6 +39,7 @@ accessible via the **File editor** add-on or Samba share
 | `baseload-ha.yaml` | Optional | Baseload from HA REST API |
 | `baseload-ha-db.yaml` | Optional | Baseload from HA SQLite database |
 | `baseload-static.yaml` | Optional | Static baseload profile |
+| `hot-water-draw.yaml` | Optional | Hot water draw forecast from HA database |
 | `scheduler.yaml` | Optional | Cron-based MQTT scheduler |
 | `reporter.yaml` | Optional | HTML report generator |
 | `config-editor.yaml` | Optional | Web-based config editor |
@@ -64,7 +65,7 @@ corresponding YAML file in the config directory and restart the add-on.
 | Path | Content |
 |------|---------|
 | `/config/` | Your YAML configuration files |
-| `/homeassistant/` | HA config directory (read-only; used by baseload-ha-db) |
+| `/homeassistant/` | HA config directory (read-only; used by baseload-ha-db and hot-water-draw) |
 | `/share/mimirheim/dumps/` | Solver debug dumps (viewable via Samba) |
 | `/share/mimirheim/reports/` | HTML energy reports (viewable via Samba) |
 | `/data/` | Trained ML model files (private to the add-on) |
