@@ -53,6 +53,13 @@ class ThermalBoilerDevice:
             name: Device name, matching the key in ``MimirheimConfig.thermal_boilers``.
             config: Validated static configuration for this thermal boiler.
         """
+        if config.uses_heat_sources():
+            # The compressor and element models are added in later changes of
+            # this feature; until then a tank configured with them is refused
+            # here rather than built with a missing electric power.
+            raise NotImplementedError(
+                f"Thermal boiler {name!r}: compressor/element heat sources are not supported yet."
+            )
         self.name = name
         self.config = config
 
@@ -145,7 +152,7 @@ class ThermalBoilerDevice:
         # >1 for heat pumps).
         thermal_cap_kwh_per_k = cfg.volume_liters * _WATER_THERMAL_CAP_KWH_PER_LITRE_K
         cool_per_step = cfg.cooling_rate_k_per_hour * ctx.dt
-        heat_rise_per_step = cfg.elec_power_kw * cfg.cop * ctx.dt / thermal_cap_kwh_per_k
+        heat_rise_per_step = cfg.elec_power_kw * cfg.effective_cop() * ctx.dt / thermal_cap_kwh_per_k
 
         for t in ctx.T:
             # prior_temp: inputs.current_temp_c at t=0, else the previous
@@ -272,5 +279,5 @@ class ThermalBoilerDevice:
         # (T_tank[T-1] - min_temp_c) gives the temperature surplus above the floor,
         # in K. Multiplying by thermal_cap converts to kWh_thermal. Dividing by cop
         # converts to the equivalent kWh_electric needed to produce that heat.
-        factor = thermal_cap / self.config.cop
+        factor = thermal_cap / self.config.effective_cop()
         return (self._T_tank[ctx.T[-1]] - self.config.min_temp_c) * factor

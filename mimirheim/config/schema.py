@@ -10,6 +10,8 @@ IO loads config, devices receive config models as constructor arguments.
 
 from __future__ import annotations
 
+import math
+
 from pathlib import Path
 from typing import Literal
 
@@ -2518,6 +2520,119 @@ class ThermalBoilerInputsConfig(BaseModel):
         ),
     )
 
+class CompressorCurvePoint(BaseModel):
+    """One point of a compressor's electric power curve.
+
+    Attributes:
+        temp_c: Tank temperature in degrees Celsius at which the power applies.
+        elec_kw: Electric power in kW drawn by the compressor while heating the
+            tank at that temperature.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    temp_c: float = Field(allow_inf_nan=False, description="Tank temperature in °C.")
+    elec_kw: float = Field(gt=0, allow_inf_nan=False, description="Electric power in kW at that tank temperature.")
+
+
+class CompressorConfig(BaseModel):
+    """A heat pump compressor heating the tank.
+
+    The compressor delivers a constant heat output while it runs, but its
+    electric power rises with the tank temperature, because a hotter tank
+    means a higher condensing temperature and therefore a lower COP. The
+    power is modelled as a straight line through two measured points, and
+    optionally shifts with the heat source temperature (for example the
+    brine of a ground-source heat pump).
+
+    Attributes:
+        heat_output_kw: Heat delivered to the tank in kW while the compressor
+            runs.
+        elec_kw_at_temp: Exactly two points of electric power against tank
+            temperature, at distinct temperatures. The line through them is
+            used, also outside the two temperatures.
+        max_temp_c: Highest tank temperature the compressor can reach. A
+            compressor step is only planned when the tank stays at or below
+            this temperature throughout the step.
+        source_ref_temp_c: Heat source temperature at which the curve was
+            measured. Must lie inside the source temperature range.
+        elec_kw_per_k_source: Change in electric power per kelvin of source
+            temperature above ``source_ref_temp_c``. 0 ignores the source.
+        source_temp_min_c: Lowest plausible source temperature. Readings
+            outside the range are ignored and the reference is used.
+        source_temp_max_c: Highest plausible source temperature.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    heat_output_kw: float = Field(gt=0, allow_inf_nan=False, description="Heat delivered to the tank in kW while running.")
+    elec_kw_at_temp: list[CompressorCurvePoint] = Field(
+        min_length=2, max_length=2, description="Two points of electric power against tank temperature.",
+    )
+    max_temp_c: float = Field(allow_inf_nan=False, description="Highest tank temperature the compressor can reach, °C.")
+    source_ref_temp_c: float = Field(
+        default=10.0, allow_inf_nan=False, description="Source temperature at which the curve was measured, °C.",
+    )
+    elec_kw_per_k_source: float = Field(
+        default=0.0, allow_inf_nan=False, description="Electric power change per K of source temperature, kW/K.",
+    )
+    source_temp_min_c: float = Field(default=-20.0, allow_inf_nan=False, description="Lowest plausible source temperature, °C.")
+    source_temp_max_c: float = Field(default=40.0, allow_inf_nan=False, description="Highest plausible source temperature, °C.")
+
+    @model_validator(mode="after")
+    def _validate_curve_and_source(self) -> "CompressorConfig":
+        """Require distinct curve temperatures and a reference inside the source range."""
+        a, b = self.elec_kw_at_temp
+        if a.temp_c == b.temp_c:
+            raise ValueError("elec_kw_at_temp needs two distinct temperatures.")
+        if self.source_temp_min_c >= self.source_temp_max_c:
+            raise ValueError("source_temp_min_c must be below source_temp_max_c.")
+        if not self.source_temp_min_c <= self.source_ref_temp_c <= self.source_temp_max_c:
+            raise ValueError(
+                f"source_ref_temp_c ({self.source_ref_temp_c}) must lie in "
+                f"[{self.source_temp_min_c}, {self.source_temp_max_c}]."
+            )
+        return self
+
+    def curve_slope_kw_per_k(self) -> float:
+        """Electric power change in kW per kelvin of tank temperature."""
+        a, b = self.elec_kw_at_temp
+        return (b.elec_kw - a.elec_kw) / (b.temp_c - a.temp_c)
+
+    def elec_kw(self, tank_temp_c: float, source_temp_c: float | None = None) -> float:
+        """Electric power in kW at a tank temperature and source temperature.
+
+        Args:
+            tank_temp_c: Tank temperature in °C.
+            source_temp_c: Source temperature in °C; ``None`` uses the reference.
+        """
+        a, _ = self.elec_kw_at_temp
+        source = self.source_ref_temp_c if source_temp_c is None else source_temp_c
+        return (
+            a.elec_kw
+            + self.curve_slope_kw_per_k() * (tank_temp_c - a.temp_c)
+            + self.elec_kw_per_k_source * (source - self.source_ref_temp_c)
+        )
+
+
+class ElementConfig(BaseModel):
+    """A resistive heating element in the tank.
+
+    The element converts electricity to heat one to one and can run at any
+    power between zero and its rating, so it can stop exactly at a target
+    temperature.
+
+    Attributes:
+        power_kw: Rated electric (and heat) power in kW.
+        max_temp_c: Highest tank temperature the element may heat to.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    power_kw: float = Field(gt=0, allow_inf_nan=False, description="Rated power in kW.")
+    max_temp_c: float = Field(allow_inf_nan=False, description="Highest tank temperature the element may heat to, °C.")
+
+
 class ThermalBoilerConfig(BaseModel):
     """Configuration for a thermal boiler: electric immersion heater or heat pump DHW.
 
@@ -2560,17 +2675,25 @@ class ThermalBoilerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     volume_liters: float = Field(gt=0, description="Water volume of the tank in litres.")
-    elec_power_kw: float = Field(
-        gt=0, description="Rated electrical power of the heating element in kW.",
-    )
-    cop: float = Field(
+    elec_power_kw: float | None = Field(
+        default=None,
         gt=0,
-        default=1.0,
-        description="Coefficient of performance. 1.0 = resistive; 2+ = heat pump.",
+        description=(
+            "Rated electrical power of the heating element in kW. Required unless "
+            "compressor or element is configured; then it must be left unset."
+        ),
     )
-    setpoint_c: float = Field(description="Target hot water temperature in °C.")
+    cop: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Coefficient of performance with elec_power_kw. 1.0 = resistive; 2+ = heat pump. "
+            "Unset means 1.0. Must be left unset when compressor or element is configured."
+        ),
+    )
+    setpoint_c: float = Field(allow_inf_nan=False, description="Target hot water temperature in °C.")
     min_temp_c: float = Field(
-        default=40.0, description="Minimum allowable water temperature in °C.",
+        default=40.0, allow_inf_nan=False, description="Minimum allowable water temperature in °C.",
     )
     cooling_rate_k_per_hour: float = Field(
         ge=0,
@@ -2592,10 +2715,83 @@ class ThermalBoilerConfig(BaseModel):
             "wear; set to 0.0 (default) for resistive immersion elements."
         ),
     )
+    compressor: CompressorConfig | None = Field(
+        default=None,
+        description="Heat pump compressor heating the tank. Replaces elec_power_kw and cop.",
+    )
+    element: ElementConfig | None = Field(
+        default=None,
+        description="Resistive element heating the tank. Replaces elec_power_kw and cop.",
+    )
     inputs: ThermalBoilerInputsConfig | None = Field(
         default_factory=ThermalBoilerInputsConfig,
         description="MQTT input topic configuration for live water temperature readings. Defaults to an empty model so topics are derived. Set to null to opt out of MQTT temperature input entirely.",
     )
+
+    def effective_cop(self) -> float:
+        """COP of the legacy heater: ``cop`` when set, otherwise 1.0 (resistive)."""
+        return 1.0 if self.cop is None else self.cop
+
+    def uses_heat_sources(self) -> bool:
+        """Return True when the tank is heated by a compressor and/or an element."""
+        return self.compressor is not None or self.element is not None
+
+    def tank_max_temp_c(self) -> float:
+        """Highest temperature the tank can reach: the setpoint or a source ceiling."""
+        ceilings = [self.setpoint_c]
+        if self.compressor is not None:
+            ceilings.append(self.compressor.max_temp_c)
+        if self.element is not None:
+            ceilings.append(self.element.max_temp_c)
+        return max(ceilings)
+
+    def tank_min_temp_bound_c(self) -> float:
+        """Lowest temperature the tank variable may take (the floor minus 5 K of slack)."""
+        return self.min_temp_c - 5.0
+
+    @model_validator(mode="after")
+    def _validate_heat_mode(self) -> "ThermalBoilerConfig":
+        """Require exactly one heat mode: legacy elec_power_kw/cop, or heat sources.
+
+        In legacy mode an unset ``cop`` means 1.0. With heat sources both
+        legacy fields must be unset; they default to ``None``, so a dump with
+        ``exclude_none`` round-trips.
+        """
+        if self.uses_heat_sources():
+            legacy = [f for f in ("elec_power_kw", "cop") if getattr(self, f) is not None]
+            if legacy:
+                raise ValueError(
+                    f"compressor/element replace elec_power_kw and cop; remove {', '.join(legacy)}."
+                )
+            for name, source in (("compressor", self.compressor), ("element", self.element)):
+                if source is not None and source.max_temp_c <= self.min_temp_c:
+                    raise ValueError(
+                        f"{name}.max_temp_c ({source.max_temp_c}) must be above "
+                        f"min_temp_c ({self.min_temp_c})."
+                    )
+            if self.compressor is not None:
+                self._validate_compressor_power(self.compressor)
+        elif self.elec_power_kw is None:
+            raise ValueError("elec_power_kw is required unless compressor or element is configured.")
+        return self
+
+    def _validate_compressor_power(self, compressor: CompressorConfig) -> None:
+        """Require positive electric power over the tank and source temperature ranges.
+
+        The power is linear in both temperatures, so checking the four corners
+        of the range covers every value in between.
+        """
+        if not math.isfinite(compressor.curve_slope_kw_per_k()):
+            raise ValueError("compressor elec_kw_at_temp gives a non-finite power slope.")
+        lo, hi = self.tank_min_temp_bound_c(), self.tank_max_temp_c()
+        for tank in (lo, hi):
+            for source in (compressor.source_temp_min_c, compressor.source_temp_max_c):
+                kw = compressor.elec_kw(tank, source)
+                if not (math.isfinite(kw) and kw > 0):
+                    raise ValueError(
+                        "compressor electric power must stay positive; it is "
+                        f"{kw:.3f} kW at tank {tank} °C and source {source} °C."
+                    )
 
     @model_validator(mode="after")
     def _validate_temp_range(self) -> "ThermalBoilerConfig":

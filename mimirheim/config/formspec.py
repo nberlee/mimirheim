@@ -23,7 +23,7 @@ under both space heating and combi heat pump) rather than re-authored per site.
 from __future__ import annotations
 
 from mimirheim_shared.formspec import FieldSpec, FormSpec, Tier
-from mimirheim_shared.visibility import Comparison, ComparisonOperator
+from mimirheim_shared.visibility import BooleanOperator, Comparison, ComparisonOperator, ConditionGroup
 
 # ---------------------------------------------------------------------------
 # Battery: leaf models
@@ -728,6 +728,65 @@ THERMAL_BOILER_INPUTS_FORM_SPEC = FormSpec(
     }
 )
 
+# The legacy elec_power_kw/cop fields apply only while neither heat source is
+# configured; hidden fields sit in a disabled fieldset and are not submitted.
+_NO_HEAT_SOURCES = ConditionGroup(
+    operator=BooleanOperator.AND,
+    conditions=[
+        Comparison(field="compressor", operator=ComparisonOperator.EQ, value=None),
+        Comparison(field="element", operator=ComparisonOperator.EQ, value=None),
+    ],
+)
+
+COMPRESSOR_CURVE_POINT_FORM_SPEC = FormSpec(
+    fields={
+        "temp_c": FieldSpec(label="Tank temperature (°C)", description="Tank temperature at which the power applies.", tier=Tier.BASIC),
+        "elec_kw": FieldSpec(label="Electric power (kW)", description="Electric power drawn at that tank temperature.", tier=Tier.BASIC),
+    }
+)
+
+COMPRESSOR_FORM_SPEC = FormSpec(
+    fields={
+        "heat_output_kw": FieldSpec(
+            label="Heat output (kW)", description="Heat delivered to the tank while the compressor runs.", tier=Tier.BASIC
+        ),
+        "elec_kw_at_temp": FieldSpec(
+            label="Electric power curve",
+            description="Two points of electric power against tank temperature, at distinct temperatures.",
+            tier=Tier.BASIC,
+            nested_form_spec=COMPRESSOR_CURVE_POINT_FORM_SPEC,
+        ),
+        "max_temp_c": FieldSpec(
+            label="Maximum temperature (°C)", description="Highest tank temperature the compressor can reach.", tier=Tier.BASIC
+        ),
+        "source_ref_temp_c": FieldSpec(
+            label="Source reference temperature (°C)",
+            description="Heat source temperature at which the curve was measured.",
+            tier=Tier.EXPERT,
+        ),
+        "elec_kw_per_k_source": FieldSpec(
+            label="Power change per source K (kW/K)",
+            description="Electric power change per kelvin of source temperature above the reference. 0 ignores the source.",
+            tier=Tier.EXPERT,
+        ),
+        "source_temp_min_c": FieldSpec(
+            label="Source minimum (°C)", description="Lowest plausible source temperature; readings below are ignored.", tier=Tier.EXPERT
+        ),
+        "source_temp_max_c": FieldSpec(
+            label="Source maximum (°C)", description="Highest plausible source temperature; readings above are ignored.", tier=Tier.EXPERT
+        ),
+    }
+)
+
+ELEMENT_FORM_SPEC = FormSpec(
+    fields={
+        "power_kw": FieldSpec(label="Power (kW)", description="Rated power of the resistive element.", tier=Tier.BASIC),
+        "max_temp_c": FieldSpec(
+            label="Maximum temperature (°C)", description="Highest tank temperature the element may heat to.", tier=Tier.BASIC
+        ),
+    }
+)
+
 THERMAL_BOILER_CONFIG_FORM_SPEC = FormSpec(
     fields={
         "volume_liters": FieldSpec(
@@ -735,13 +794,15 @@ THERMAL_BOILER_CONFIG_FORM_SPEC = FormSpec(
         ),
         "elec_power_kw": FieldSpec(
             label="Electrical power (kW)",
-            description="Rated electrical power of the heating element in kW.",
+            description="Rated electrical power of the heating element in kW. Not used with a compressor or element.",
             tier=Tier.BASIC,
+            visible_if=_NO_HEAT_SOURCES,
         ),
         "cop": FieldSpec(
             label="Coefficient of performance (COP)",
-            description="Coefficient of performance. 1.0 = resistive; 2+ = heat pump.",
+            description="Coefficient of performance with the electrical power. 1.0 (unset) = resistive; 2+ = heat pump.",
             tier=Tier.EXPERT,
+            visible_if=_NO_HEAT_SOURCES,
         ),
         "setpoint_c": FieldSpec(
             label="Target temperature (°C)", description="Target hot water temperature in degrees C.", tier=Tier.BASIC
@@ -765,6 +826,18 @@ THERMAL_BOILER_CONFIG_FORM_SPEC = FormSpec(
             label="Wear cost (€/kWh)",
             description="Cycling cost per kWh of electrical consumption, in EUR.",
             tier=Tier.BASIC,
+        ),
+        "compressor": FieldSpec(
+            label="Compressor",
+            description="Heat pump compressor heating the tank. Replaces the electrical power and COP fields.",
+            tier=Tier.EXPERT,
+            nested_form_spec=COMPRESSOR_FORM_SPEC,
+        ),
+        "element": FieldSpec(
+            label="Element",
+            description="Resistive element heating the tank. Replaces the electrical power and COP fields.",
+            tier=Tier.EXPERT,
+            nested_form_spec=ELEMENT_FORM_SPEC,
         ),
         "inputs": FieldSpec(
             label="Input topics",

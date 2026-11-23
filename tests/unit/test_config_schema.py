@@ -894,7 +894,8 @@ def test_thermal_boiler_defaults_valid() -> None:
     from mimirheim.config.schema import ThermalBoilerConfig
 
     cfg = ThermalBoilerConfig.model_validate(_thermal_boiler_data())
-    assert cfg.cop == 1.0
+    assert cfg.cop is None
+    assert cfg.effective_cop() == 1.0
     assert cfg.min_run_steps == 0
     assert cfg.wear_cost_eur_per_kwh == 0.0
 
@@ -3041,3 +3042,264 @@ def test_soc_ratchet_hold_bounds() -> None:
         SocRatchetConfig(enabled=True, hold_hours=-0.25)
     with pytest.raises(ValidationError):
         SocRatchetConfig(enabled=True, hold_hours=24.25)
+
+
+# ---------------------------------------------------------------------------
+# ThermalBoilerConfig heat sources (compressor and element)
+# ---------------------------------------------------------------------------
+
+
+def _sources_data(**overrides: object) -> dict:
+    """A boiler driven by a compressor and an element instead of elec_power_kw."""
+    base = _thermal_boiler_data()
+    del base["elec_power_kw"]
+    base["compressor"] = {
+        "heat_output_kw": 4.5,
+        "elec_kw_at_temp": [{"temp_c": 35.0, "elec_kw": 1.1}, {"temp_c": 58.0, "elec_kw": 1.9}],
+        "max_temp_c": 55.0,
+    }
+    base["element"] = {"power_kw": 6.2, "max_temp_c": 67.0}
+    base.update(overrides)
+    return base
+
+
+class TestThermalBoilerHeatSources:
+    def test_sources_mode_validates(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        cfg = ThermalBoilerConfig.model_validate(_sources_data())
+        assert cfg.elec_power_kw is None
+        assert cfg.compressor is not None and cfg.element is not None
+        assert cfg.compressor.source_ref_temp_c == 10.0
+        assert cfg.compressor.elec_kw_per_k_source == 0.0
+        assert (cfg.compressor.source_temp_min_c, cfg.compressor.source_temp_max_c) == (-20.0, 40.0)
+
+    def test_tank_max_temp_is_the_highest_ceiling(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        assert ThermalBoilerConfig.model_validate(_sources_data()).tank_max_temp_c() == 67.0
+        legacy = ThermalBoilerConfig.model_validate(_thermal_boiler_data())
+        assert legacy.tank_max_temp_c() == legacy.setpoint_c
+
+    def test_element_only_is_legal(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        del data["compressor"]
+        assert ThermalBoilerConfig.model_validate(data).compressor is None
+
+    def test_compressor_only_is_legal(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        del data["element"]
+        assert ThermalBoilerConfig.model_validate(data).element is None
+
+    def test_legacy_mode_still_requires_elec_power_kw(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _thermal_boiler_data()
+        del data["elec_power_kw"]
+        with pytest.raises(ValidationError, match="elec_power_kw"):
+            ThermalBoilerConfig.model_validate(data)
+
+    @pytest.mark.parametrize("legacy", [{"elec_power_kw": 3.0}, {"cop": 3.0}, {"cop": 1.0}])
+    def test_legacy_fields_rejected_with_sources(self, legacy: dict) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(_sources_data(**legacy))
+
+    def test_curve_needs_exactly_two_points(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        for points in ([{"temp_c": 35.0, "elec_kw": 1.1}], [{"temp_c": t, "elec_kw": 1.0} for t in (30.0, 40.0, 50.0)]):
+            data = _sources_data()
+            data["compressor"]["elec_kw_at_temp"] = points
+            with pytest.raises(ValidationError):
+                ThermalBoilerConfig.model_validate(data)
+
+    def test_curve_temperatures_must_differ(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data["compressor"]["elec_kw_at_temp"] = [{"temp_c": 40.0, "elec_kw": 1.1}, {"temp_c": 40.0, "elec_kw": 1.9}]
+        with pytest.raises(ValidationError, match="distinct"):
+            ThermalBoilerConfig.model_validate(data)
+
+    def test_power_must_stay_positive_over_tank_and_source_range(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        # Steep curve: extrapolated to the tank's lower bound it goes negative.
+        data = _sources_data()
+        data["compressor"]["elec_kw_at_temp"] = [{"temp_c": 50.0, "elec_kw": 0.2}, {"temp_c": 55.0, "elec_kw": 2.0}]
+        with pytest.raises(ValidationError, match="positive"):
+            ThermalBoilerConfig.model_validate(data)
+        # A source slope that drives power negative at a source extreme.
+        data = _sources_data()
+        data["compressor"]["elec_kw_per_k_source"] = 0.2
+        with pytest.raises(ValidationError, match="positive"):
+            ThermalBoilerConfig.model_validate(data)
+
+    def test_source_reference_must_lie_in_domain(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data["compressor"]["source_ref_temp_c"] = 50.0
+        with pytest.raises(ValidationError, match="source_ref_temp_c"):
+            ThermalBoilerConfig.model_validate(data)
+
+    def test_source_domain_must_be_increasing(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data["compressor"]["source_temp_min_c"] = 20.0
+        data["compressor"]["source_temp_max_c"] = 10.0
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(data)
+
+    @pytest.mark.parametrize("which", ["compressor", "element"])
+    def test_source_max_temp_must_exceed_min_temp(self, which: str) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data[which]["max_temp_c"] = 40.0  # equals min_temp_c
+        with pytest.raises(ValidationError, match="max_temp_c"):
+            ThermalBoilerConfig.model_validate(data)
+
+    @pytest.mark.parametrize(
+        "path,value",
+        [
+            (("compressor", "heat_output_kw"), 0.0),
+            (("element", "power_kw"), 0.0),
+            (("compressor", "max_temp_c"), float("nan")),
+            (("element", "max_temp_c"), float("inf")),
+        ],
+    )
+    def test_source_field_bounds(self, path: tuple[str, str], value: float) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data[path[0]][path[1]] = value
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(data)
+
+    @pytest.mark.parametrize("which", ["compressor", "element"])
+    def test_sources_reject_unknown_fields(self, which: str) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data[which]["bogus"] = 1
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(data)
+
+    def test_sources_config_round_trips_through_a_dump(self) -> None:
+        """The debug dump serialises with exclude_none; the result must revalidate."""
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        cfg = ThermalBoilerConfig.model_validate(_sources_data())
+        dumped = cfg.model_dump(mode="json", exclude_none=True)
+        assert "cop" not in dumped and "elec_power_kw" not in dumped
+        assert ThermalBoilerConfig.model_validate(dumped) == cfg
+
+    def test_legacy_config_round_trips_through_a_dump(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        cfg = ThermalBoilerConfig.model_validate(_thermal_boiler_data(cop=3.0))
+        assert ThermalBoilerConfig.model_validate(cfg.model_dump(mode="json", exclude_none=True)) == cfg
+
+    def test_editor_hides_legacy_fields_when_a_source_is_present(self) -> None:
+        from mimirheim.config.formspec import THERMAL_BOILER_CONFIG_FORM_SPEC
+        from mimirheim_shared.visibility import evaluate_condition
+
+        for name in ("cop", "elec_power_kw"):
+            cond = THERMAL_BOILER_CONFIG_FORM_SPEC.fields[name].visible_if
+            assert cond is not None
+            assert evaluate_condition(cond, {"compressor": None, "element": None}) is True
+            assert evaluate_condition(cond, {"compressor": {"x": 1}, "element": None}) is False
+            assert evaluate_condition(cond, {"compressor": None, "element": {"x": 1}}) is False
+
+    def test_curve_overflow_rejected(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data["compressor"]["elec_kw_at_temp"] = [
+            {"temp_c": 0.0, "elec_kw": 1.0}, {"temp_c": 1e-308, "elec_kw": 10.0},
+        ]
+        with pytest.raises(ValidationError, match="finite|positive"):
+            ThermalBoilerConfig.model_validate(data)
+
+    @pytest.mark.parametrize("field", ["min_temp_c", "setpoint_c"])
+    @pytest.mark.parametrize("value", [float("nan"), float("inf")])
+    def test_tank_temperatures_must_be_finite(self, field: str, value: float) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        del data["compressor"]
+        data[field] = value
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(data)
+
+    def test_zero_power_at_a_corner_rejected(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        # Line through (35, 0.5) and (45, 1.0): 0 kW exactly at 25 C, below the
+        # tank's lower bound (min_temp_c - 5 = 35) only if min_temp_c is 30.
+        data = _sources_data(min_temp_c=30.0)
+        data["compressor"]["elec_kw_at_temp"] = [
+            {"temp_c": 35.0, "elec_kw": 0.5}, {"temp_c": 45.0, "elec_kw": 1.0},
+        ]
+        with pytest.raises(ValidationError, match="positive"):
+            ThermalBoilerConfig.model_validate(data)
+
+    def test_power_failure_at_the_upper_tank_bound_rejected(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        # Falling curve: positive at low temperatures, negative at 67 C.
+        data = _sources_data()
+        data["compressor"]["elec_kw_at_temp"] = [
+            {"temp_c": 35.0, "elec_kw": 2.0}, {"temp_c": 55.0, "elec_kw": 0.5},
+        ]
+        with pytest.raises(ValidationError, match="positive"):
+            ThermalBoilerConfig.model_validate(data)
+
+    @pytest.mark.parametrize("ref", [-20.0, 40.0])
+    def test_reference_at_domain_endpoints_valid(self, ref: float) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data["compressor"]["source_ref_temp_c"] = ref
+        assert ThermalBoilerConfig.model_validate(data).compressor.source_ref_temp_c == ref
+
+    def test_equal_domain_endpoints_rejected(self) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data["compressor"]["source_temp_min_c"] = 10.0
+        data["compressor"]["source_temp_max_c"] = 10.0
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(data)
+
+    @pytest.mark.parametrize("point", [{"temp_c": 35.0}, {"temp_c": 35.0, "elec_kw": 0.0},
+                                       {"temp_c": 35.0, "elec_kw": 1.0, "bogus": 1}])
+    def test_invalid_curve_point_rejected(self, point: dict) -> None:
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        data["compressor"]["elec_kw_at_temp"] = [point, {"temp_c": 58.0, "elec_kw": 1.9}]
+        with pytest.raises(ValidationError):
+            ThermalBoilerConfig.model_validate(data)
+
+    def test_power_curve_numbers(self) -> None:
+        from mimirheim.config.schema import CompressorConfig
+
+        c = CompressorConfig.model_validate({
+            "heat_output_kw": 4.5, "max_temp_c": 55.0, "elec_kw_per_k_source": 0.04,
+            "elec_kw_at_temp": [{"temp_c": 58.0, "elec_kw": 1.9}, {"temp_c": 35.0, "elec_kw": 1.1}],
+        })
+        slope = 0.8 / 23.0
+        assert c.curve_slope_kw_per_k() == pytest.approx(slope)
+        assert c.elec_kw(35.0) == pytest.approx(1.1)            # reversed point order
+        assert c.elec_kw(46.5) == pytest.approx(1.5)            # interpolation
+        assert c.elec_kw(64.0) == pytest.approx(1.9 + 6 * slope)  # extrapolation
+        assert c.elec_kw(35.0, source_temp_c=15.0) == pytest.approx(1.1 + 0.2)  # source correction

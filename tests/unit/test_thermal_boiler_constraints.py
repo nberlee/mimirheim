@@ -404,3 +404,13 @@ def test_planned_temp_c_reads_the_end_of_step_tank_temperature() -> None:
     expected = [45.0 - drop, 45.0 - 2 * drop + rise, 45.0 - 3 * drop + rise, 45.0 - 4 * drop + rise]
     for t in ctx.T:
         assert device.planned_temp_c(ctx, t) == pytest.approx(expected[t], abs=1e-6)
+
+
+def test_heat_source_tanks_are_refused_until_supported() -> None:
+    """A tank configured with compressor/element is refused, not built with no power."""
+    cfg = ThermalBoilerConfig(
+        volume_liters=200.0, setpoint_c=55.0, min_temp_c=40.0, cooling_rate_k_per_hour=2.0,
+        element={"power_kw": 3.0, "max_temp_c": 60.0},
+    )
+    with pytest.raises(NotImplementedError):
+        ThermalBoilerDevice(name="boiler", config=cfg)
