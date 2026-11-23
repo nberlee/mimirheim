@@ -129,6 +129,9 @@ class ReadinessState:
         """
         self._lock = threading.Lock()
         self._entries: dict[str, tuple[Any, datetime]] = {}
+        # Thermal boilers whose source temperature is currently ignored, so the
+        # warning is logged once when a reading turns unusable, not per snapshot.
+        self._source_temp_ignored: set[str] = set()
         self._current_strategy: str = "minimize_cost"
         self._config = config
 
@@ -492,7 +495,7 @@ class ReadinessState:
                 )
             return ""
 
-    def _thermal_source_temp(self, cfg: ThermalBoilerConfig) -> tuple[float | None, bool]:
+    def _thermal_source_temp(self, name: str, cfg: ThermalBoilerConfig) -> tuple[float | None, bool]:
         """Return the usable source temperature of a thermal boiler and an invalid flag.
 
         A missing reading gives ``(None, False)``. A reading stored as
@@ -504,12 +507,25 @@ class ReadinessState:
             return None, False
         entry = self._entries.get(cfg.inputs.topic_source_temp)
         if entry is None:
+            self._source_temp_ignored.discard(name)
             return None, False
         value = entry[0]
-        if isinstance(value, InvalidReading):
+        if isinstance(value, InvalidReading) or not (
+            cfg.compressor.source_temp_min_c <= value <= cfg.compressor.source_temp_max_c
+        ):
+            if name not in self._source_temp_ignored:
+                self._source_temp_ignored.add(name)
+                logger.warning(
+                    "Thermal boiler %r: source temperature %r is unusable; using the reference %.1f °C "
+                    "until a usable reading arrives.",
+                    name,
+                    value,
+                    cfg.compressor.source_ref_temp_c,
+                )
             return None, True
-        if not cfg.compressor.source_temp_min_c <= value <= cfg.compressor.source_temp_max_c:
-            return None, True
+        if name in self._source_temp_ignored:
+            self._source_temp_ignored.discard(name)
+            logger.info("Thermal boiler %r: source temperature usable again (%.1f °C).", name, value)
         return float(value), False
 
     def snapshot(self) -> SolveBundle:
@@ -739,7 +755,7 @@ class ReadinessState:
                 temp_entry = self._entries.get(cfg.inputs.topic_current_temp)
                 if temp_entry is None:
                     continue
-                source_temp_c, source_temp_invalid = self._thermal_source_temp(cfg)
+                source_temp_c, source_temp_invalid = self._thermal_source_temp(name, cfg)
                 run_entry = (
                     self._entries.get(cfg.inputs.topic_current_run_minutes)
                     if cfg.inputs.topic_current_run_minutes is not None

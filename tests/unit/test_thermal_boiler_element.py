@@ -170,3 +170,21 @@ def test_wear_cost_applies_to_the_compressor_only() -> None:
 def test_element_only_tank_has_no_wear_cost() -> None:
     ctx, device = _build(_config(wear_cost=0.1), horizon=1)
     assert device.objective_terms(0) == []
+
+
+def test_active_source_reports_the_element_only_when_it_delivers_power() -> None:
+    ctx, device = _build(_config(), horizon=2)
+    ctx.solver.add_constraint(device._elem_kw[0] == 2.0)
+    ctx.solver.add_constraint(device._elem_on[1] == 1)
+    ctx.solver.add_constraint(device._elem_kw[1] == 0.0)
+    ctx.solver.set_objective_minimize(device._T_tank[0])
+    ctx.solver.solve()
+    assert [device.active_source(ctx, t) for t in ctx.T] == ["element", "off"]
+
+
+def test_element_only_terminal_value_uses_cop_one() -> None:
+    ctx, device = _build(_config(), horizon=1)
+    ctx.solver.add_constraint(device._elem_kw[0] == 0.0)
+    ctx.solver.set_objective_minimize(device._T_tank[0])
+    ctx.solver.solve()
+    assert _value(ctx, device.terminal_soc_var(ctx)) == pytest.approx((45.0 - _COOL - 40.0) * _CAP, abs=1e-6)

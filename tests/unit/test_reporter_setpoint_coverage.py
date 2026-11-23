@@ -66,6 +66,9 @@ _REPORTER_EXPLICITLY_EXCLUDED_FIELDS: frozenset[str] = frozenset(
         # flows and storage SOC in kWh; it has no temperature axis, and the
         # boiler's electricity already appears as load.
         "planned_temp_c",
+        # active_source names the thermal boiler's running heat source for
+        # its executor; the reporter shows the electricity, not the source.
+        "active_source",
     }
 )
 

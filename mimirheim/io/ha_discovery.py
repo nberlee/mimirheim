@@ -207,8 +207,10 @@ def publish_discovery(client: Any, config: MimirheimConfig) -> None:
                 "{%- set ns = namespace(f=[]) -%}"
                 "{%- for s in value_json.schedule -%}"
                 f'{{%- set p = s.devices["{device_name}"].planned_temp_c | default(none) -%}}'
+                f'{{%- set a = s.devices["{device_name}"].active_source | default(none) -%}}'
                 f'{{%- set ns.f = ns.f + [{{"kw": s.devices["{device_name}"].kw | round(3), '
-                '"planned_temp_c": (p | round(2)) if p is not none else none, "ts": s.ts}] -%}'
+                '"planned_temp_c": (p | round(2)) if p is not none else none, '
+                '"active_source": a, "ts": s.ts}] -%}'
                 "{%- endfor -%}"
                 '{{ {"forecast": ns.f} | tojson }}'
             )

@@ -404,3 +404,15 @@ def test_planned_temp_c_reads_the_end_of_step_tank_temperature() -> None:
     expected = [45.0 - drop, 45.0 - 2 * drop + rise, 45.0 - 3 * drop + rise, 45.0 - 4 * drop + rise]
     for t in ctx.T:
         assert device.planned_temp_c(ctx, t) == pytest.approx(expected[t], abs=1e-6)
+
+
+def test_active_source_reports_the_legacy_heater() -> None:
+    ctx = _make_ctx(horizon=2)
+    device = ThermalBoilerDevice(name="boiler", config=_config(setpoint_c=80.0))
+    device.add_variables(ctx)
+    device.add_constraints(ctx, inputs=_inputs(current_temp_c=45.0))
+    ctx.solver.add_constraint(device._heater_on[0] == 1)
+    ctx.solver.add_constraint(device._heater_on[1] == 0)
+    ctx.solver.set_objective_minimize(device._T_tank[0])
+    ctx.solver.solve()
+    assert [device.active_source(ctx, t) for t in ctx.T] == ["heater", "off"]

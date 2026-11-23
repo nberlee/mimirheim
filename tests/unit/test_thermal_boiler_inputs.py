@@ -214,3 +214,43 @@ class TestReadiness:
         assert state.snapshot().thermal_boiler_inputs["dhw"].current_run_minutes == 20.0
         state.update(topic, parse_current_run_minutes(b"-4"))
         assert state.snapshot().thermal_boiler_inputs["dhw"].current_run_minutes is None
+
+
+def test_an_ignored_source_temperature_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    state = _ready_state(_config())
+    state.update("mimir/input/thermal_boiler/dhw/source_temp_c", parse_finite_float(b"nan"))
+    with caplog.at_level("WARNING", logger="mimirheim.readiness"):
+        state.snapshot()
+    assert any("dhw" in r.message and "source temperature" in r.message for r in caplog.records)
+
+
+def test_a_valid_or_absent_source_temperature_is_not_logged(caplog: pytest.LogCaptureFixture) -> None:
+    state = _ready_state(_config())
+    with caplog.at_level("WARNING", logger="mimirheim.readiness"):
+        state.snapshot()
+        state.update("mimir/input/thermal_boiler/dhw/source_temp_c", parse_finite_float(b"9"))
+        state.snapshot()
+    assert not any("source temperature" in r.message for r in caplog.records)
+
+
+def test_the_warning_is_logged_once_per_transition(caplog: pytest.LogCaptureFixture) -> None:
+    """Repeated snapshots with the same unusable reading warn once; recovery re-arms it."""
+    state = _ready_state(_config())
+    topic = "mimir/input/thermal_boiler/dhw/source_temp_c"
+
+    def warnings() -> int:
+        return sum("source temperature" in r.message for r in caplog.records)
+
+    with caplog.at_level("WARNING", logger="mimirheim.readiness"):
+        state.update(topic, parse_finite_float(b"nan"))
+        for _ in range(3):
+            state.snapshot()
+        assert warnings() == 1
+        state.update(topic, parse_finite_float(b"80"))  # still unusable: out of range
+        state.snapshot()
+        assert warnings() == 1
+        state.update(topic, parse_finite_float(b"9"))
+        state.snapshot()
+        state.update(topic, parse_finite_float(b"inf"))
+        state.snapshot()
+        assert warnings() == 2

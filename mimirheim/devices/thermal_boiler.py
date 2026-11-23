@@ -457,6 +457,24 @@ class ThermalBoilerDevice:
         """
         return float(ctx.solver.var_value(self._T_tank[t]))
 
+    def active_source(self, ctx: ModelContext, t: int) -> str:
+        """Heat source running in step t after a solve.
+
+        Args:
+            ctx: The solved model context.
+            t: Zero-based time step index.
+
+        Returns:
+            ``"heater"`` (legacy boiler on), ``"compressor"``, ``"element"``
+            (only while it delivers power), or ``"off"``.
+        """
+        cfg = self.config
+        if t in self._heater_on and round(ctx.solver.var_value(self._heater_on[t])) == 1:
+            return "compressor" if cfg.uses_heat_sources() else "heater"
+        if t in self._elem_kw and ctx.solver.var_value(self._elem_kw[t]) > 1e-6:
+            return "element"
+        return "off"
+
     def net_power(self, t: int) -> Any:
         """Net AC power drawn from the home bus at step t, in kW.
 
@@ -520,6 +538,20 @@ class ThermalBoilerDevice:
             * self._dt
         ]
 
+    def _terminal_cop(self) -> float:
+        """COP used to convert stored heat into the electricity it would cost.
+
+        With a compressor this is its COP at the setpoint and the reference
+        source temperature, the rate at which it would replace the heat.
+        An element-only tank uses 1.0; a legacy tank its ``cop``.
+        """
+        comp = self.config.compressor
+        if comp is not None:
+            return comp.heat_output_kw / comp.elec_kw(self.config.setpoint_c)
+        if self.config.element is not None:
+            return 1.0
+        return self.config.effective_cop()
+
     def terminal_soc_var(self, ctx: ModelContext) -> Any | None:
         """Return a solver expression proportional to the thermal energy stored at T-1.
 
@@ -556,5 +588,5 @@ class ThermalBoilerDevice:
         # (T_tank[T-1] - min_temp_c) gives the temperature surplus above the floor,
         # in K. Multiplying by thermal_cap converts to kWh_thermal. Dividing by cop
         # converts to the equivalent kWh_electric needed to produce that heat.
-        factor = thermal_cap / self.config.effective_cop()
+        factor = thermal_cap / self._terminal_cop()
         return (self._T_tank[ctx.T[-1]] - self.config.min_temp_c) * factor

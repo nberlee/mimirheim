@@ -56,7 +56,8 @@
         "dhw_tank": {
           "kw": -2.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 53.0751
+          "planned_temp_c": 53.0751,
+          "active_source": "heater"
         }
       }
     },
@@ -103,7 +104,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 52.7001
+          "planned_temp_c": 52.7001,
+          "active_source": "off"
         }
       }
     },
@@ -150,7 +152,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 52.3251
+          "planned_temp_c": 52.3251,
+          "active_source": "off"
         }
       }
     },
@@ -197,7 +200,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.9501
+          "planned_temp_c": 51.9501,
+          "active_source": "off"
         }
       }
     },
@@ -244,7 +248,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.5751
+          "planned_temp_c": 51.5751,
+          "active_source": "off"
         }
       }
     },
@@ -291,7 +296,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.2001
+          "planned_temp_c": 51.2001,
+          "active_source": "off"
         }
       }
     },
@@ -338,7 +344,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.8251
+          "planned_temp_c": 50.8251,
+          "active_source": "off"
         }
       }
     },
@@ -385,7 +392,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.4501
+          "planned_temp_c": 50.4501,
+          "active_source": "off"
         }
       }
     },
@@ -432,7 +440,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.0751
+          "planned_temp_c": 50.0751,
+          "active_source": "off"
         }
       }
     },
@@ -479,7 +488,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.7001
+          "planned_temp_c": 49.7001,
+          "active_source": "off"
         }
       }
     },
@@ -526,7 +536,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.3251
+          "planned_temp_c": 49.3251,
+          "active_source": "off"
         }
       }
     },
@@ -573,7 +584,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.9501
+          "planned_temp_c": 48.9501,
+          "active_source": "off"
         }
       }
     },
@@ -620,7 +632,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.5751
+          "planned_temp_c": 48.5751,
+          "active_source": "off"
         }
       }
     },
@@ -667,7 +680,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.2001
+          "planned_temp_c": 48.2001,
+          "active_source": "off"
         }
       }
     },
@@ -714,7 +728,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.8251
+          "planned_temp_c": 47.8251,
+          "active_source": "off"
         }
       }
     },
@@ -761,7 +776,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.4501
+          "planned_temp_c": 47.4501,
+          "active_source": "off"
         }
       }
     },
@@ -808,7 +824,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.0751
+          "planned_temp_c": 47.0751,
+          "active_source": "off"
         }
       }
     },
@@ -855,7 +872,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 46.7001
+          "planned_temp_c": 46.7001,
+          "active_source": "off"
         }
       }
     },
@@ -902,7 +920,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 46.3251
+          "planned_temp_c": 46.3251,
+          "active_source": "off"
         }
       }
     },
@@ -949,7 +968,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 45.9501
+          "planned_temp_c": 45.9501,
+          "active_source": "off"
         }
       }
     },
@@ -996,7 +1016,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 45.5751
+          "planned_temp_c": 45.5751,
+          "active_source": "off"
         }
       }
     },
@@ -1043,7 +1064,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 45.2001
+          "planned_temp_c": 45.2001,
+          "active_source": "off"
         }
       }
     },
@@ -1090,7 +1112,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 44.8251
+          "planned_temp_c": 44.8251,
+          "active_source": "off"
         }
       }
     },
@@ -1137,7 +1160,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 44.4501
+          "planned_temp_c": 44.4501,
+          "active_source": "off"
         }
       }
     },
@@ -1184,7 +1208,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 44.0751
+          "planned_temp_c": 44.0751,
+          "active_source": "off"
         }
       }
     },
@@ -1231,7 +1256,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 43.7001
+          "planned_temp_c": 43.7001,
+          "active_source": "off"
         }
       }
     },
@@ -1278,7 +1304,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 43.3251
+          "planned_temp_c": 43.3251,
+          "active_source": "off"
         }
       }
     },
@@ -1325,7 +1352,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 42.9501
+          "planned_temp_c": 42.9501,
+          "active_source": "off"
         }
       }
     },
@@ -1372,7 +1400,8 @@
         "dhw_tank": {
           "kw": -2.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.0251
+          "planned_temp_c": 49.0251,
+          "active_source": "heater"
         }
       }
     },
@@ -1419,7 +1448,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.6501
+          "planned_temp_c": 48.6501,
+          "active_source": "off"
         }
       }
     },
@@ -1466,7 +1496,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.2751
+          "planned_temp_c": 48.2751,
+          "active_source": "off"
         }
       }
     },
@@ -1513,7 +1544,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.9001
+          "planned_temp_c": 47.9001,
+          "active_source": "off"
         }
       }
     },
@@ -1560,7 +1592,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.5251
+          "planned_temp_c": 47.5251,
+          "active_source": "off"
         }
       }
     },
@@ -1607,7 +1640,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.1501
+          "planned_temp_c": 47.1501,
+          "active_source": "off"
         }
       }
     },
@@ -1654,7 +1688,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 46.7751
+          "planned_temp_c": 46.7751,
+          "active_source": "off"
         }
       }
     },
@@ -1701,7 +1736,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 46.4001
+          "planned_temp_c": 46.4001,
+          "active_source": "off"
         }
       }
     },
@@ -1748,7 +1784,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 46.0251
+          "planned_temp_c": 46.0251,
+          "active_source": "off"
         }
       }
     },
@@ -1795,7 +1832,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 45.6501
+          "planned_temp_c": 45.6501,
+          "active_source": "off"
         }
       }
     },
@@ -1842,7 +1880,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 45.2751
+          "planned_temp_c": 45.2751,
+          "active_source": "off"
         }
       }
     },
@@ -1889,7 +1928,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 44.9001
+          "planned_temp_c": 44.9001,
+          "active_source": "off"
         }
       }
     },
@@ -1936,7 +1976,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 44.5251
+          "planned_temp_c": 44.5251,
+          "active_source": "off"
         }
       }
     },
@@ -1983,7 +2024,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 44.1501
+          "planned_temp_c": 44.1501,
+          "active_source": "off"
         }
       }
     },
@@ -2030,7 +2072,8 @@
         "dhw_tank": {
           "kw": -2.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.2252
+          "planned_temp_c": 50.2252,
+          "active_source": "heater"
         }
       }
     },
@@ -2077,7 +2120,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.8502
+          "planned_temp_c": 49.8502,
+          "active_source": "off"
         }
       }
     },
@@ -2124,7 +2168,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.4752
+          "planned_temp_c": 49.4752,
+          "active_source": "off"
         }
       }
     },
@@ -2171,7 +2216,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.1002
+          "planned_temp_c": 49.1002,
+          "active_source": "off"
         }
       }
     },
@@ -2218,7 +2264,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.7252
+          "planned_temp_c": 48.7252,
+          "active_source": "off"
         }
       }
     },
@@ -2265,7 +2312,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.3502
+          "planned_temp_c": 48.3502,
+          "active_source": "off"
         }
       }
     },
@@ -2312,7 +2360,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.9752
+          "planned_temp_c": 47.9752,
+          "active_source": "off"
         }
       }
     },
@@ -2359,7 +2408,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.6002
+          "planned_temp_c": 47.6002,
+          "active_source": "off"
         }
       }
     },
@@ -2406,7 +2456,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.2252
+          "planned_temp_c": 47.2252,
+          "active_source": "off"
         }
       }
     },
@@ -2453,7 +2504,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 46.8502
+          "planned_temp_c": 46.8502,
+          "active_source": "off"
         }
       }
     },
@@ -2500,7 +2552,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 46.4752
+          "planned_temp_c": 46.4752,
+          "active_source": "off"
         }
       }
     },
@@ -2547,7 +2600,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 46.1002
+          "planned_temp_c": 46.1002,
+          "active_source": "off"
         }
       }
     },
@@ -2594,7 +2648,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 45.7252
+          "planned_temp_c": 45.7252,
+          "active_source": "off"
         }
       }
     },
@@ -2641,7 +2696,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 45.3502
+          "planned_temp_c": 45.3502,
+          "active_source": "off"
         }
       }
     },
@@ -2688,7 +2744,8 @@
         "dhw_tank": {
           "kw": -2.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.4253
+          "planned_temp_c": 51.4253,
+          "active_source": "heater"
         }
       }
     },
@@ -2735,7 +2792,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.0503
+          "planned_temp_c": 51.0503,
+          "active_source": "off"
         }
       }
     },
@@ -2782,7 +2840,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.6753
+          "planned_temp_c": 50.6753,
+          "active_source": "off"
         }
       }
     },
@@ -2829,7 +2888,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.3003
+          "planned_temp_c": 50.3003,
+          "active_source": "off"
         }
       }
     },
@@ -2876,7 +2936,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.9253
+          "planned_temp_c": 49.9253,
+          "active_source": "off"
         }
       }
     },
@@ -2923,7 +2984,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.5503
+          "planned_temp_c": 49.5503,
+          "active_source": "off"
         }
       }
     },
@@ -2970,7 +3032,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.1753
+          "planned_temp_c": 49.1753,
+          "active_source": "off"
         }
       }
     },
@@ -3017,7 +3080,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.8003
+          "planned_temp_c": 48.8003,
+          "active_source": "off"
         }
       }
     },
@@ -3064,7 +3128,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.4253
+          "planned_temp_c": 48.4253,
+          "active_source": "off"
         }
       }
     },
@@ -3111,7 +3176,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.0503
+          "planned_temp_c": 48.0503,
+          "active_source": "off"
         }
       }
     },
@@ -3158,7 +3224,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.6753
+          "planned_temp_c": 47.6753,
+          "active_source": "off"
         }
       }
     },
@@ -3205,7 +3272,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 47.3003
+          "planned_temp_c": 47.3003,
+          "active_source": "off"
         }
       }
     },
@@ -3252,7 +3320,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 46.9253
+          "planned_temp_c": 46.9253,
+          "active_source": "off"
         }
       }
     },
@@ -3299,7 +3368,8 @@
         "dhw_tank": {
           "kw": -2.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 53.0004
+          "planned_temp_c": 53.0004,
+          "active_source": "heater"
         }
       }
     },
@@ -3346,7 +3416,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 52.6254
+          "planned_temp_c": 52.6254,
+          "active_source": "off"
         }
       }
     },
@@ -3393,7 +3464,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 52.2504
+          "planned_temp_c": 52.2504,
+          "active_source": "off"
         }
       }
     },
@@ -3440,7 +3512,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.8754
+          "planned_temp_c": 51.8754,
+          "active_source": "off"
         }
       }
     },
@@ -3487,7 +3560,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.5004
+          "planned_temp_c": 51.5004,
+          "active_source": "off"
         }
       }
     },
@@ -3534,7 +3608,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.1254
+          "planned_temp_c": 51.1254,
+          "active_source": "off"
         }
       }
     },
@@ -3581,7 +3656,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.7504
+          "planned_temp_c": 50.7504,
+          "active_source": "off"
         }
       }
     },
@@ -3628,7 +3704,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.3754
+          "planned_temp_c": 50.3754,
+          "active_source": "off"
         }
       }
     },
@@ -3675,7 +3752,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.0004
+          "planned_temp_c": 50.0004,
+          "active_source": "off"
         }
       }
     },
@@ -3722,7 +3800,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.6254
+          "planned_temp_c": 49.6254,
+          "active_source": "off"
         }
       }
     },
@@ -3769,7 +3848,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.2504
+          "planned_temp_c": 49.2504,
+          "active_source": "off"
         }
       }
     },
@@ -3816,7 +3896,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.8754
+          "planned_temp_c": 48.8754,
+          "active_source": "off"
         }
       }
     },
@@ -3863,7 +3944,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.5004
+          "planned_temp_c": 48.5004,
+          "active_source": "off"
         }
       }
     },
@@ -3910,7 +3992,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 48.1254
+          "planned_temp_c": 48.1254,
+          "active_source": "off"
         }
       }
     },
@@ -3957,7 +4040,8 @@
         "dhw_tank": {
           "kw": -2.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 54.2004
+          "planned_temp_c": 54.2004,
+          "active_source": "heater"
         }
       }
     },
@@ -4004,7 +4088,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 53.8254
+          "planned_temp_c": 53.8254,
+          "active_source": "off"
         }
       }
     },
@@ -4051,7 +4136,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 53.4504
+          "planned_temp_c": 53.4504,
+          "active_source": "off"
         }
       }
     },
@@ -4098,7 +4184,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 53.0754
+          "planned_temp_c": 53.0754,
+          "active_source": "off"
         }
       }
     },
@@ -4145,7 +4232,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 52.7004
+          "planned_temp_c": 52.7004,
+          "active_source": "off"
         }
       }
     },
@@ -4192,7 +4280,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 52.3254
+          "planned_temp_c": 52.3254,
+          "active_source": "off"
         }
       }
     },
@@ -4239,7 +4328,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.9504
+          "planned_temp_c": 51.9504,
+          "active_source": "off"
         }
       }
     },
@@ -4286,7 +4376,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.5754
+          "planned_temp_c": 51.5754,
+          "active_source": "off"
         }
       }
     },
@@ -4333,7 +4424,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 51.2004
+          "planned_temp_c": 51.2004,
+          "active_source": "off"
         }
       }
     },
@@ -4380,7 +4472,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.8254
+          "planned_temp_c": 50.8254,
+          "active_source": "off"
         }
       }
     },
@@ -4427,7 +4520,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.4504
+          "planned_temp_c": 50.4504,
+          "active_source": "off"
         }
       }
     },
@@ -4474,7 +4568,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 50.0754
+          "planned_temp_c": 50.0754,
+          "active_source": "off"
         }
       }
     },
@@ -4521,7 +4616,8 @@
         "dhw_tank": {
           "kw": 0.0,
           "type": "thermal_boiler",
-          "planned_temp_c": 49.7004
+          "planned_temp_c": 49.7004,
+          "active_source": "off"
         }
       }
     }

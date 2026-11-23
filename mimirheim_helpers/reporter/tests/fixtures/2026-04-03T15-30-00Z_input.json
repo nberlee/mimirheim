@@ -706,7 +706,8 @@
   "hybrid_inverter_inputs": {},
   "thermal_boiler_inputs": {
     "dhw_tank": {
-      "current_temp_c": 47.0
+      "current_temp_c": 47.0,
+      "source_temp_invalid": false
     }
   },
   "space_heating_inputs": {},

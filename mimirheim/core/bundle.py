@@ -20,6 +20,7 @@ vocabulary between the IO layer (which populates the models) and the solver core
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -536,6 +537,10 @@ class DeviceSetpoint(BaseModel):
             end of this time step. Populated for thermal boilers (and heat
             stores) only. None for all other device types. A band-controlled
             heater uses it as the temperature to heat to.
+        active_source: Heat source a thermal boiler runs in this time step:
+            ``"heater"`` for a legacy (``elec_power_kw``) boiler,
+            ``"compressor"`` or ``"element"`` for a boiler with heat sources,
+            or ``"off"``. None for all other device types.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -549,6 +554,7 @@ class DeviceSetpoint(BaseModel):
     pv_is_curtailed: bool | None = None
     soc_kwh: float | None = None
     planned_temp_c: float | None = None
+    active_source: Literal["off", "heater", "compressor", "element"] | None = None
 
 
 class ScheduleStep(BaseModel):

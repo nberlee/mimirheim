@@ -2044,7 +2044,7 @@ def test_published_load_types_match_the_reporter() -> None:
     assert _LOAD_TYPES == REPORTER_LOAD_TYPES
 
 
-def _publish_thermal_boiler_step(planned_temp_c: float | None) -> MagicMock:
+def _publish_thermal_boiler_step(planned_temp_c: float | None, active_source: str | None = None) -> MagicMock:
     """Publish one step with a thermal boiler and a static load."""
     from mimirheim.config.schema import ThermalBoilerConfig
 
@@ -2059,7 +2059,9 @@ def _publish_thermal_boiler_step(planned_temp_c: float | None) -> MagicMock:
         grid_import_kw=2.0,
         grid_export_kw=0.0,
         devices={
-            "tank": DeviceSetpoint(kw=-2.0, type="thermal_boiler", planned_temp_c=planned_temp_c),
+            "tank": DeviceSetpoint(
+                kw=-2.0, type="thermal_boiler", planned_temp_c=planned_temp_c, active_source=active_source
+            ),
             "base": DeviceSetpoint(kw=-0.5, type="static_load"),
         },
     )
@@ -2084,3 +2086,12 @@ def test_thermal_boiler_setpoint_omits_absent_planned_temp_c() -> None:
     """Without a planned temperature the key is left out rather than published as null."""
     client = _publish_thermal_boiler_step(None)
     assert _published(client, "mimir/device/tank/setpoint") == {"kw": -2.0, "type": "thermal_boiler"}
+
+
+def test_thermal_boiler_setpoint_carries_the_active_source() -> None:
+    """The setpoint payload names the heat source running in the current step."""
+    client = _publish_thermal_boiler_step(48.6789, "compressor")
+    assert _published(client, "mimir/device/tank/setpoint") == {
+        "kw": -2.0, "type": "thermal_boiler", "planned_temp_c": 48.68, "active_source": "compressor",
+    }
+    assert "active_source" not in _published(client, "mimir/device/base/setpoint")

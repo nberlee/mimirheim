@@ -1247,3 +1247,14 @@ class TestThermalBoilerPlannedTemperatureAttribute:
         schedule["schedule"][0]["devices"]["dhw_boiler"] = {"kw": 0.0, "type": "thermal_boiler"}
         out = _render_template(self._template(), schedule)
         assert out["forecast"][0]["planned_temp_c"] is None
+        assert out["forecast"][0]["active_source"] is None
+
+    def test_template_renders_the_active_source_per_step(self) -> None:
+        schedule = _make_mock_schedule(n_steps=2)
+        for i, source in enumerate(("compressor", "off")):
+            schedule["schedule"][i]["devices"]["dhw_boiler"] = {
+                "kw": -1.5 if source != "off" else 0.0, "type": "thermal_boiler",
+                "planned_temp_c": 50.0, "active_source": source,
+            }
+        out = _render_template(self._template(), schedule)
+        assert [f["active_source"] for f in out["forecast"]] == ["compressor", "off"]

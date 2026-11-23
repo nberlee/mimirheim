@@ -104,6 +104,7 @@ def _result() -> SolveResult:
                         kw=-3.0,
                         type="thermal_boiler",
                         planned_temp_c=48.5 + t,
+                        active_source="heater",
                     ),
                 },
             )

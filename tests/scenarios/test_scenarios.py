@@ -107,3 +107,8 @@ def test_golden_scenario(
                     f"step={step.t} device={name!r}: "
                     f"{setpoint.planned_temp_c} != {g_temp}"
                 )
+            g_source = g_step.devices[name].active_source
+            assert setpoint.active_source == g_source, (
+                f"step={step.t} device={name!r}: "
+                f"active source {setpoint.active_source!r} != {g_source!r}"
+            )

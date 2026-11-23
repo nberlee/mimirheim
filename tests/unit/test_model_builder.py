@@ -678,3 +678,53 @@ def test_thermal_boiler_setpoints_carry_the_planned_temperature() -> None:
         + (3.0 * 0.25 / (200.0 * 4186 / 3600 / 1000)) * (1 if result.schedule[0].devices["dhw"].kw < 0 else 0),
         abs=1e-6,
     )
+
+
+def test_device_setpoint_active_source_rejects_unknown_values() -> None:
+    from pydantic import ValidationError
+
+    assert DeviceSetpoint(kw=1.0, type="static_load").active_source is None
+    with pytest.raises(ValidationError):
+        DeviceSetpoint(kw=-1.0, type="thermal_boiler", active_source="boiling")
+
+
+def test_thermal_boiler_setpoints_carry_the_active_source() -> None:
+    """A legacy boiler reports heater while drawing power and off otherwise."""
+    from mimirheim.core.bundle import ThermalBoilerInputs
+
+    horizon = 4
+    config = MimirheimConfig.model_validate(
+        {
+            "mqtt": {"host": "localhost", "client_id": "test"},
+            "grid": {"import_limit_kw": 20.0, "export_limit_kw": 20.0},
+            "static_loads": {"base": {}},
+            "thermal_boilers": {
+                "dhw": {
+                    "volume_liters": 200.0,
+                    "elec_power_kw": 3.0,
+                    "setpoint_c": 55.0,
+                    "min_temp_c": 40.0,
+                    "cooling_rate_k_per_hour": 2.0,
+                }
+            },
+        }
+    )
+    bundle = SolveBundle(
+        solve_time_utc=datetime(2026, 6, 1, 12, tzinfo=timezone.utc),
+        horizon_prices=[0.25] * horizon,
+        horizon_export_prices=[0.10] * horizon,
+        horizon_confidence=[1.0] * horizon,
+        pv_forecast=[0.0] * horizon,
+        base_load_forecast=[1.0] * horizon,
+        thermal_boiler_inputs={"dhw": ThermalBoilerInputs(current_temp_c=40.6)},
+    )
+
+    result = build_and_solve(bundle, config)
+
+    assert result.solve_status in ("optimal", "feasible")
+    sources = [step.devices["dhw"].active_source for step in result.schedule]
+    assert "heater" in sources
+    for step in result.schedule:
+        dhw = step.devices["dhw"]
+        assert dhw.active_source == ("heater" if dhw.kw < -1e-6 else "off")
+        assert step.devices["base"].active_source is None

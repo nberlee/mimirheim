@@ -269,6 +269,10 @@ class MqttPublisher:
                 # uses as its target. Left out, rather than null, when absent.
                 if setpoint.type == "thermal_boiler" and setpoint.planned_temp_c is not None:
                     payload["planned_temp_c"] = round(setpoint.planned_temp_c, 2)
+                # It also names the heat source running in the step, which an
+                # executor with several sources follows.
+                if setpoint.type == "thermal_boiler" and setpoint.active_source is not None:
+                    payload["active_source"] = setpoint.active_source
                 self._client.publish(
                     f"{prefix}/device/{device_name}/setpoint",
                     json.dumps(payload),

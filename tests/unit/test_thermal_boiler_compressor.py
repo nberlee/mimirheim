@@ -330,3 +330,25 @@ def test_carry_over_and_start_ceiling_agree_at_the_boundary(offset: float) -> No
 def test_carry_over_is_dropped_when_the_first_step_clearly_passes_the_ceiling() -> None:
     ctx, device = _build_running(15.0, current_temp_c=60.0 - _RISE + 1e-6, horizon=4)
     assert _min_heating(ctx, device) == [0, 0, 0, 0]
+
+
+def test_active_source_reports_the_compressor() -> None:
+    ctx, device = _build(_config(), horizon=2)
+    ctx.solver.add_constraint(device._heater_on[0] == 1)
+    ctx.solver.add_constraint(device._heater_on[1] == 0)
+    ctx.solver.set_objective_minimize(device._T_tank[0])
+    ctx.solver.solve()
+    assert [device.active_source(ctx, t) for t in ctx.T] == ["compressor", "off"]
+
+
+def test_terminal_value_uses_the_compressor_cop_at_the_setpoint() -> None:
+    """Heat left in the tank is valued at the electricity the compressor would need for it."""
+    cfg = _config(setpoint_c=55.0, max_temp_c=55.0)
+    assert cfg.compressor is not None
+    ctx, device = _build(cfg, horizon=1)
+    ctx.solver.add_constraint(device._heater_on[0] == 0)
+    ctx.solver.set_objective_minimize(device._T_tank[0])
+    ctx.solver.solve()
+    cop_ref = 2.0 / cfg.compressor.elec_kw(55.0)
+    expected = (45.0 - _COOL - 40.0) * _CAP / cop_ref
+    assert _value(ctx, device.terminal_soc_var(ctx)) == pytest.approx(expected, abs=1e-6)
