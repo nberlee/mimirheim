@@ -233,3 +233,100 @@ def test_start_power_is_clamped_to_the_validated_range() -> None:
     assert ctx.solver.solve() in ("optimal", "feasible")
     assert _on(ctx, device, 0) == 1
     assert -_value(ctx, device.net_power(0)) == pytest.approx(cfg.compressor.elec_kw(35.0), abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Minimum run carried over from the previous solve (current_run_minutes)
+# ---------------------------------------------------------------------------
+
+
+def _build_running(
+    current_run_minutes: float | None, current_temp_c: float = 45.0, horizon: int = 6, min_run_steps: int = 4
+) -> tuple[ModelContext, ThermalBoilerDevice]:
+    ctx = ModelContext(solver=CBCSolverBackend(), horizon=horizon, dt=_DT)
+    device = ThermalBoilerDevice(name="dhw", config=_config(min_run_steps=min_run_steps))
+    device.add_variables(ctx)
+    device.add_constraints(
+        ctx,
+        inputs=ThermalBoilerInputs(current_temp_c=current_temp_c, current_run_minutes=current_run_minutes),
+    )
+    return ctx, device
+
+
+def _min_heating(ctx: ModelContext, device: ThermalBoilerDevice) -> list[int]:
+    ctx.solver.set_objective_minimize(sum(device._heater_on[t] for t in ctx.T))
+    assert ctx.solver.solve() in ("optimal", "feasible")
+    return [_on(ctx, device, t) for t in ctx.T]
+
+
+@pytest.mark.parametrize("run_minutes,forced", [(30.0, 2), (20.0, 3), (45.0, 1)])
+def test_a_run_short_of_its_minimum_continues(run_minutes: float, forced: int) -> None:
+    """min_run 4 steps = 60 min; the remaining minutes round up to whole steps."""
+    ctx, device = _build_running(run_minutes)
+    assert _min_heating(ctx, device) == [1] * forced + [0] * (6 - forced)
+
+
+@pytest.mark.parametrize("run_minutes", [60.0, 90.0])
+def test_a_run_past_its_minimum_may_stop_at_once(run_minutes: float) -> None:
+    ctx, device = _build_running(run_minutes)
+    assert _min_heating(ctx, device) == [0] * 6
+
+
+def test_a_start_at_the_first_step_runs_the_full_minimum() -> None:
+    """Off before the solve: switching on at t=0 is a start and must last min_run steps."""
+    ctx, device = _build_running(0.0)
+    ctx.solver.add_constraint(device._heater_on[0] == 1)
+    assert _min_heating(ctx, device) == [1, 1, 1, 1, 0, 0]
+
+
+def test_a_continuing_run_is_not_a_new_start() -> None:
+    """Running past the minimum: staying on at t=0 imposes no new minimum."""
+    ctx, device = _build_running(75.0)
+    ctx.solver.add_constraint(device._heater_on[0] == 1)
+    assert _min_heating(ctx, device) == [1, 0, 0, 0, 0, 0]
+
+
+def test_unknown_run_time_keeps_the_previous_behaviour() -> None:
+    ctx, device = _build_running(None)
+    ctx.solver.add_constraint(device._heater_on[0] == 1)
+    assert _min_heating(ctx, device) == [1, 0, 0, 0, 0, 0]
+
+
+def test_forced_continuation_is_truncated_at_the_horizon_end() -> None:
+    ctx, device = _build_running(15.0, horizon=2)
+    assert _min_heating(ctx, device) == [1, 1]
+
+
+def test_forced_continuation_stops_at_the_heating_ceiling() -> None:
+    """The appliance stops at its limit whatever its minimum run; the model must stay feasible.
+
+    From 54 °C each step adds rise - cool = 1.65 K, and the ceiling is 60 °C:
+    step 0 peaks at 56.15, step 1 at 57.80, step 2 at 59.45 and step 3 would
+    peak at 61.10. Only the first three of the four remaining steps are forced.
+    """
+    ctx, device = _build_running(0.001, current_temp_c=54.0, horizon=6)
+    assert _min_heating(ctx, device) == [1, 1, 1, 0, 0, 0]
+
+
+def test_repeated_solves_complete_one_minimum_run() -> None:
+    """A run started in one solve is carried through the next solves."""
+    plans = []
+    for run_minutes in (0.0, 15.0, 30.0, 45.0, 60.0):
+        ctx, device = _build_running(run_minutes)
+        if run_minutes == 0.0:
+            ctx.solver.add_constraint(device._heater_on[0] == 1)
+        plans.append(_min_heating(ctx, device)[0])
+    assert plans == [1, 1, 1, 1, 0]
+
+
+@pytest.mark.parametrize("offset", [0.0, 5e-10, -5e-10])
+def test_carry_over_and_start_ceiling_agree_at_the_boundary(offset: float) -> None:
+    """Both checks treat a first-step peak at the ceiling the same, so the model stays feasible."""
+    ctx, device = _build_running(15.0, current_temp_c=60.0 - _RISE + offset, horizon=4)
+    plan = _min_heating(ctx, device)
+    assert plan[0] == 1
+
+
+def test_carry_over_is_dropped_when_the_first_step_clearly_passes_the_ceiling() -> None:
+    ctx, device = _build_running(15.0, current_temp_c=60.0 - _RISE + 1e-6, horizon=4)
+    assert _min_heating(ctx, device) == [0, 0, 0, 0]

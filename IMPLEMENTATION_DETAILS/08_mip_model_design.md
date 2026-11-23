@@ -322,6 +322,15 @@ With `on[t] = 0` the first two force `z[t] = 0` and the last two are slack; with
 
 The compressor runs full steps only (no partial duty within a step), so the product is exact and the minimum run acts on real operation. The config validator checks that the power is finite and positive at the four corners of (tank range x source range); the power is linear in both, so every value in between is positive too.
 
+**Minimum run across solves.** `start[t]` exists only for `t >= 1`, so on its own the minimum run does not constrain step 0: a compressor could run a single step at t=0 in every solve and never honour `min_run_steps`. The optional input `current_run_minutes` (0 = off) closes that gap:
+
+- `0`: running at t=0 is a start, so `on[tau] >= on[0]` for `tau` in `1 .. min_run_steps-1`.
+- Above 0 and short of `min_run_steps * step_minutes`: the run started before this solve. The leading `ceil(remaining_minutes / step_minutes)` steps are forced on, but only while the step peak `T0 + t * (rise - cool) + rise` stays at or below the ceiling. While forced on (with the element excluded) the trajectory is fixed, so this is a constant check, not a constraint. The appliance stops at its limit whatever its minimum run, and forcing past that point would make the model infeasible.
+- At or past the minimum: no constraint, so the compressor may stop at t=0, and staying on is a continuation rather than a new start.
+- Unknown (`None`): no constraint, as before this input existed.
+
+Runs that would extend past the horizon end are truncated there; the next solve sees the run in `current_run_minutes` and continues it.
+
 **Element.** The element converts electricity to heat one to one. Its power `elem_kw[t]` is continuous in `[0, power_kw]`, so it can stop exactly at a target temperature (the executor ends heating when the target is reached). A binary `elem_on[t]` exists only to keep the element out of compressor steps and to switch its ceiling:
 
 ```

@@ -13,6 +13,7 @@ as a ``ThermalBoilerInputs`` argument to ``add_constraints``. All solver interac
 go through ``ModelContext.solver``.
 """
 
+import math
 from typing import Any
 
 from mimirheim.config.schema import ThermalBoilerConfig
@@ -25,6 +26,19 @@ from mimirheim.core.context import ModelContext
 # Used to convert electrical energy input (kWh) to temperature rise (K):
 #   ΔT = kWh_thermal / (volume_L × _WATER_THERMAL_CAP_KWH_PER_LITRE_K)
 _WATER_THERMAL_CAP_KWH_PER_LITRE_K: float = 4186 / 3600 / 1000  # kWh/(L·K)
+
+# Tolerance in K for comparing a constant step peak with a heating ceiling.
+_CEILING_TOL_K: float = 1e-9
+
+
+def _peak_exceeds(peak_c: float, ceiling_c: float) -> bool:
+    """Return True when a constant step peak lies above a heating ceiling.
+
+    Every constant-peak check (the start rule at t=0 and the forced run
+    carried over from the previous solve) uses this one comparison, so the
+    two can never disagree at the boundary and make the model infeasible.
+    """
+    return peak_c > ceiling_c + _CEILING_TOL_K
 
 
 class ThermalBoilerDevice:
@@ -184,6 +198,7 @@ class ThermalBoilerDevice:
             self._add_source_constraints(ctx, inputs)
             if cfg.compressor is not None:
                 self._add_min_run_constraints(ctx)
+                self._add_run_carry_over(ctx, inputs)
             return
 
         # Thermal parameters derived from static config (plain floats, not
@@ -230,6 +245,62 @@ class ThermalBoilerDevice:
                         ctx.solver.add_constraint(
                             self._heater_on[t + tau] >= self._start[t]
                         )
+
+    def _add_run_carry_over(self, ctx: ModelContext, inputs: ThermalBoilerInputs) -> None:
+        """Carry the compressor's minimum run across the start of the horizon.
+
+        ``_start[t]`` only exists for ``t >= 1``, so without this a run could
+        start or stop at t=0 regardless of ``min_run_steps``. With
+        ``inputs.current_run_minutes`` known:
+
+        - 0 (off before the solve): running at t=0 is a start and must last
+          ``min_run_steps`` steps, truncated at the horizon end.
+        - Above 0 and short of the minimum: the leading steps covering the
+          remaining minutes are forced on, but only while the step peak stays
+          at or below the heating ceiling, because the appliance stops at its
+          limit whatever its minimum run.
+        - At or past the minimum: the compressor may stop at once, and staying
+          on is a continuation, not a new start.
+
+        ``None`` (unknown) adds nothing, which keeps the behaviour of tanks
+        without this input. See IMPLEMENTATION_DETAILS.md §8, subsection
+        "Thermal boiler heat sources".
+
+        Args:
+            ctx: The current solve context.
+            inputs: Live readings; ``current_run_minutes`` and ``current_temp_c``.
+        """
+        cfg = self.config
+        comp = cfg.compressor
+        run_minutes = inputs.current_run_minutes
+        if comp is None or cfg.min_run_steps <= 1 or run_minutes is None:
+            return
+        steps = len(ctx.T)
+        on = self._heater_on
+        if run_minutes == 0.0:
+            # A start at t=0 propagates like start[t] does for later steps.
+            for tau in range(1, min(cfg.min_run_steps, steps)):
+                ctx.solver.add_constraint(on[tau] >= on[0])
+            return
+
+        step_minutes = ctx.dt * 60.0
+        remaining_minutes = cfg.min_run_steps * step_minutes - run_minutes
+        if remaining_minutes <= 0.0:
+            return
+        forced = min(math.ceil(remaining_minutes / step_minutes - 1e-9), steps)
+        # While forced on (and the element excluded) the trajectory is fixed:
+        # each step adds rise and loses the cooling, so the peak of step t is
+        # T0 + t * (rise - cool) + rise. Force only the steps before the first
+        # peak above the ceiling.
+        thermal_cap_kwh_per_k = cfg.volume_liters * _WATER_THERMAL_CAP_KWH_PER_LITRE_K
+        rise = comp.heat_output_kw * ctx.dt / thermal_cap_kwh_per_k
+        cool = cfg.cooling_rate_k_per_hour * ctx.dt
+        ceiling = min(comp.max_temp_c, cfg.setpoint_c)
+        for t in range(forced):
+            if _peak_exceeds(inputs.current_temp_c + t * (rise - cool) + rise, ceiling):
+                break
+            # on[t]: forced on, the run started before this solve.
+            ctx.solver.add_constraint(on[t] == 1)
 
     def _add_source_constraints(self, ctx: ModelContext, inputs: ThermalBoilerInputs) -> None:
         """Add dynamics, bounds, heating ceilings and electric power for a heat-source tank.
@@ -317,7 +388,7 @@ class ThermalBoilerDevice:
             # allowed only when the step peak stays at or below the ceiling,
             # and the power is exact without linearisation. The temperature
             # is clamped to the validated range, where the power is positive.
-            if prior + rise > ceiling:
+            if _peak_exceeds(prior + rise, ceiling):
                 ctx.solver.add_constraint(on == 0)
             t0_clamped = min(max(prior, cfg.tank_min_temp_bound_c()), cfg.tank_max_temp_c())
             return comp.elec_kw(t0_clamped, inputs.source_temp_c) * on
