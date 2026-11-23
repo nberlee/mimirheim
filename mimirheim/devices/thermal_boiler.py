@@ -46,7 +46,8 @@ class ThermalBoilerDevice:
 
     With ``config.compressor`` set, ``_heater_on`` is the compressor's on/off
     state and the electric power depends on the start-of-step temperature and
-    the source temperature (see ``_add_compressor_constraints``).
+    the source temperature, and ``_elem_on``/``_elem_kw`` model the element
+    (see ``_add_source_constraints``).
 
     Attributes:
         name: Device name matching the key in ``config.thermal_boilers``.
@@ -60,13 +61,6 @@ class ThermalBoilerDevice:
             name: Device name, matching the key in ``MimirheimConfig.thermal_boilers``.
             config: Validated static configuration for this thermal boiler.
         """
-        if config.element is not None:
-            # The element model is added in a later change of this feature;
-            # until then a tank configured with one is refused here rather
-            # than built without the element.
-            raise NotImplementedError(
-                f"Thermal boiler {name!r}: element heat sources are not supported yet."
-            )
         self.name = name
         self.config = config
 
@@ -76,10 +70,16 @@ class ThermalBoilerDevice:
         # _start[t] = 1 when the heater transitions from off (t-1) to on (t).
         # Only populated when min_run_steps > 1.
         self._start: dict[int, Any] = {}
-        # Compressor mode only: _z[t] = heater_on[t] * T_tank[t-1] for t >= 1,
-        # and the electric power expression per step (see add_constraints).
+        # Compressor only: _z[t] = heater_on[t] * T_tank[t-1] for t >= 1.
         self._z: dict[int, Any] = {}
+        # Element only: activation binary and continuous electric power.
+        self._elem_on: dict[int, Any] = {}
+        self._elem_kw: dict[int, Any] = {}
+        # Heat-source mode: total electric power expression per step, built
+        # in add_constraints.
         self._elec_kw: dict[int, Any] = {}
+        # Compressor electric power expression per step (heat-source mode).
+        self._comp_kw: dict[int, Any] = {}
 
         self._dt: float = 0.25  # set from ctx in add_variables
 
@@ -117,7 +117,7 @@ class ThermalBoilerDevice:
         cfg = self.config
 
         for t in ctx.T:
-            if cfg.compressor is None:
+            if not cfg.uses_heat_sources():
                 # T_tank[t]: tank temperature at the end of step t.
                 # A small slack on the bounds (±5°C) keeps the LP feasible under
                 # minor numerical noise while the real bounds are handled as
@@ -127,15 +127,26 @@ class ThermalBoilerDevice:
                     ub=cfg.setpoint_c + 5.0,
                 )
             else:
-                # T_tank[t] in °C, compressor mode. No fixed upper bound: a tank
+                # T_tank[t] in °C, heat-source mode. No fixed upper bound: a tank
                 # left hot by other heating may start above every limit and
                 # cools passively. add_constraints adds the upper bound once
                 # the starting temperature is known. See IMPLEMENTATION_DETAILS.md
-                # §8, subsection "Thermal boiler compressor".
+                # §8, subsection "Thermal boiler heat sources".
                 self._T_tank[t] = ctx.solver.add_var(lb=cfg.tank_min_temp_bound_c())
 
-            # heater_on[t]: binary on/off for the heating element.
-            self._heater_on[t] = ctx.solver.add_var(lb=0.0, ub=1.0, integer=True)
+            if not cfg.uses_heat_sources() or cfg.compressor is not None:
+                # heater_on[t]: binary on/off for the legacy heater or the
+                # compressor (1 = runs the full step).
+                self._heater_on[t] = ctx.solver.add_var(lb=0.0, ub=1.0, integer=True)
+
+            if cfg.element is not None:
+                # elem_on[t]: binary, 1 = the element may heat in step t. Only
+                # needed to keep it out of compressor steps and to switch its
+                # heating ceiling on and off.
+                self._elem_on[t] = ctx.solver.add_var(lb=0.0, ub=1.0, integer=True)
+                # elem_kw[t]: element electric (and heat) power in kW, any value
+                # up to the rating, so it can stop exactly at a target.
+                self._elem_kw[t] = ctx.solver.add_var(lb=0.0, ub=cfg.element.power_kw)
 
             if cfg.compressor is not None and t >= 1 and cfg.compressor.curve_slope_kw_per_k() != 0.0:
                 # z[t]: heater_on[t] * T_tank[t-1], in °C when on and 0 when off.
@@ -169,9 +180,10 @@ class ThermalBoilerDevice:
                 is the initial tank temperature for the first step.
         """
         cfg = self.config
-        if cfg.compressor is not None:
-            self._add_compressor_constraints(ctx, inputs)
-            self._add_min_run_constraints(ctx)
+        if cfg.uses_heat_sources():
+            self._add_source_constraints(ctx, inputs)
+            if cfg.compressor is not None:
+                self._add_min_run_constraints(ctx)
             return
 
         # Thermal parameters derived from static config (plain floats, not
@@ -219,82 +231,148 @@ class ThermalBoilerDevice:
                             self._heater_on[t + tau] >= self._start[t]
                         )
 
-    def _add_compressor_constraints(self, ctx: ModelContext, inputs: ThermalBoilerInputs) -> None:
-        """Add dynamics, bounds, heating ceiling and electric power for a compressor tank.
+    def _add_source_constraints(self, ctx: ModelContext, inputs: ThermalBoilerInputs) -> None:
+        """Add dynamics, bounds, heating ceilings and electric power for a heat-source tank.
 
         Within a step, heat is added first and the cooling loss is removed
         afterwards, so the highest temperature in step t is
-        ``T_tank[t-1] + rise`` and the lowest is the lower endpoint. See
-        IMPLEMENTATION_DETAILS.md §8, subsection "Thermal boiler compressor".
+        ``T_tank[t-1] + heat * dt / cap`` and the lowest is the lower
+        endpoint. See IMPLEMENTATION_DETAILS.md §8, subsection "Thermal boiler
+        heat sources".
 
         Args:
             ctx: The current solve context.
             inputs: Live readings. ``current_temp_c`` is the starting
                 temperature; ``source_temp_c`` (None means the reference
-                temperature) shifts the electric power.
+                temperature) shifts the compressor's electric power.
+        """
+        cfg = self.config
+        comp = cfg.compressor
+        elem = cfg.element
+        thermal_cap_kwh_per_k = cfg.volume_liters * _WATER_THERMAL_CAP_KWH_PER_LITRE_K
+        cool_per_step = cfg.cooling_rate_k_per_hour * ctx.dt
+        t0 = inputs.current_temp_c
+        # lower, upper: bounds on every T_tank[t] in °C. Heating only happens
+        # below a ceiling <= tank_max_temp_c(), so the tank never exceeds
+        # max(tank_max_temp_c(), start).
+        lower = cfg.min_temp_c
+        upper = max(cfg.tank_max_temp_c(), t0)
+        # k_per_kw: temperature gain in K over one step per kW of heat.
+        k_per_kw = ctx.dt / thermal_cap_kwh_per_k
+
+        for t in ctx.T:
+            prior: Any = t0 if t == 0 else self._T_tank[t - 1]
+            heat_k: Any = 0.0
+            elec_kw: Any = 0.0
+            if comp is not None:
+                heat_k = heat_k + comp.heat_output_kw * k_per_kw * self._heater_on[t]
+                self._comp_kw[t] = self._add_compressor_step(ctx, t, prior, inputs, lower, upper)
+                elec_kw = elec_kw + self._comp_kw[t]
+            if elem is not None:
+                heat_k = heat_k + k_per_kw * self._elem_kw[t]
+                elec_kw = elec_kw + self._elem_kw[t]
+                self._add_element_step(ctx, t, prior, lower, upper, k_per_kw)
+            if comp is not None and elem is not None:
+                # One source per step: the element never runs during a
+                # compressor step.
+                ctx.solver.add_constraint(self._heater_on[t] + self._elem_on[t] <= 1)
+            self._elec_kw[t] = elec_kw
+
+            # Tank temperature after heating and cooling in step t.
+            ctx.solver.add_constraint(self._T_tank[t] == prior - cool_per_step + heat_k)
+            # Hard floor, as in legacy mode; the upper bound follows from the
+            # ceilings and keeps the linearisation exact.
+            ctx.solver.add_constraint(self._T_tank[t] >= lower)
+            ctx.solver.add_constraint(self._T_tank[t] <= upper)
+
+    def _add_compressor_step(
+        self, ctx: ModelContext, t: int, prior: Any, inputs: ThermalBoilerInputs, lower: float, upper: float
+    ) -> Any:
+        """Add the compressor's heating ceiling for step t and return its electric power.
+
+        Args:
+            ctx: The current solve context.
+            t: Zero-based time step index.
+            prior: Start-of-step tank temperature: the measured constant at
+                t=0, otherwise ``T_tank[t-1]``.
+            inputs: Live readings (source temperature).
+            lower: Lower bound on ``T_tank`` in °C.
+            upper: Upper bound on ``T_tank`` in °C.
+
+        Returns:
+            Solver expression for the compressor's electric power in kW.
         """
         cfg = self.config
         comp = cfg.compressor
         assert comp is not None
-        thermal_cap_kwh_per_k = cfg.volume_liters * _WATER_THERMAL_CAP_KWH_PER_LITRE_K
-        cool_per_step = cfg.cooling_rate_k_per_hour * ctx.dt
+        on = self._heater_on[t]
         # rise: temperature gain in K over one step of compressor operation.
-        rise = comp.heat_output_kw * ctx.dt / thermal_cap_kwh_per_k
-        # ceiling: highest temperature heating may reach within a step, in °C.
-        # The setpoint is the heating target; the source limit is physical.
+        rise = comp.heat_output_kw * ctx.dt / (cfg.volume_liters * _WATER_THERMAL_CAP_KWH_PER_LITRE_K)
+        # ceiling: highest temperature compressor heating may reach within a
+        # step, in °C. The setpoint is the heating target; the limit is physical.
         ceiling = min(comp.max_temp_c, cfg.setpoint_c)
-        t0 = inputs.current_temp_c
-        # lower, upper: bounds on every T_tank[t] in °C. Heating only happens
-        # below the ceiling, so the tank never exceeds max(ceiling, start).
-        lower = cfg.min_temp_c
-        upper = max(cfg.tank_max_temp_c(), t0)
-        slope = comp.curve_slope_kw_per_k()
+
+        if t == 0:
+            # Start-of-step temperature is a measured constant: running is
+            # allowed only when the step peak stays at or below the ceiling,
+            # and the power is exact without linearisation. The temperature
+            # is clamped to the validated range, where the power is positive.
+            if prior + rise > ceiling:
+                ctx.solver.add_constraint(on == 0)
+            t0_clamped = min(max(prior, cfg.tank_min_temp_bound_c()), cfg.tank_max_temp_c())
+            return comp.elec_kw(t0_clamped, inputs.source_temp_c) * on
+
+        # Peak ceiling: T_tank[t-1] + rise <= ceiling while on. When off, the
+        # big-M term (the largest possible excess) relaxes it, so a hot tank
+        # can still cool passively.
+        big_m = max(0.0, upper + rise - ceiling)
+        ctx.solver.add_constraint(prior + rise <= ceiling + big_m * (1 - on))
+
         # Electric power while running at tank temperature T:
         #   elec_kw(T) = intercept + slope * T, with the source shift folded in.
         intercept = comp.elec_kw(0.0, inputs.source_temp_c)
+        if t not in self._z:
+            # slope == 0: the power does not depend on the tank temperature.
+            return intercept * on
+        z = self._z[t]
+        # Exact linearisation of z = on * T_tank[t-1] for a binary on and
+        # T_tank[t-1] in [lower, upper]: on = 0 forces z = 0, on = 1 forces
+        # z = T_tank[t-1]. See IMPLEMENTATION_DETAILS.md §8, subsection
+        # "Thermal boiler heat sources".
+        ctx.solver.add_constraint(z >= lower * on)
+        ctx.solver.add_constraint(z <= upper * on)
+        ctx.solver.add_constraint(z >= prior - upper * (1 - on))
+        ctx.solver.add_constraint(z <= prior - lower * (1 - on))
+        return intercept * on + comp.curve_slope_kw_per_k() * z
 
-        for t in ctx.T:
-            on = self._heater_on[t]
-            prior: Any = t0 if t == 0 else self._T_tank[t - 1]
-            # Tank temperature after heating and cooling in step t.
-            ctx.solver.add_constraint(self._T_tank[t] == prior - cool_per_step + rise * on)
-            # Hard floor, as in legacy mode; the upper bound follows from the
-            # ceiling and keeps the linearisation below exact.
-            ctx.solver.add_constraint(self._T_tank[t] >= lower)
-            ctx.solver.add_constraint(self._T_tank[t] <= upper)
+    def _add_element_step(
+        self, ctx: ModelContext, t: int, prior: Any, lower: float, upper: float, k_per_kw: float
+    ) -> None:
+        """Add the element's activation link and heating ceiling for step t.
 
-            if t == 0:
-                # Start-of-step temperature is a measured constant: running is
-                # allowed only when the step peak stays at or below the
-                # ceiling, and the power is exact without linearisation. The
-                # temperature is clamped to the validated range, where the
-                # power is known to be positive.
-                if t0 + rise > ceiling:
-                    ctx.solver.add_constraint(on == 0)
-                t0_clamped = min(max(t0, cfg.tank_min_temp_bound_c()), cfg.tank_max_temp_c())
-                self._elec_kw[t] = comp.elec_kw(t0_clamped, inputs.source_temp_c) * on
-                continue
-
-            # Peak ceiling: T_tank[t-1] + rise <= ceiling while on. When off,
-            # the big-M term (the largest possible excess) relaxes it, so a hot
-            # tank can still cool passively.
-            big_m = max(0.0, upper + rise - ceiling)
-            ctx.solver.add_constraint(prior + rise <= ceiling + big_m * (1 - on))
-
-            if t not in self._z:
-                # slope == 0: the power does not depend on the tank temperature.
-                self._elec_kw[t] = intercept * on
-                continue
-            z = self._z[t]
-            # Exact linearisation of z = on * T_tank[t-1] for a binary on and
-            # T_tank[t-1] in [lower, upper]: on = 0 forces z = 0, on = 1
-            # forces z = T_tank[t-1]. See IMPLEMENTATION_DETAILS.md §8,
-            # subsection "Thermal boiler compressor".
-            ctx.solver.add_constraint(z >= lower * on)
-            ctx.solver.add_constraint(z <= upper * on)
-            ctx.solver.add_constraint(z >= prior - upper * (1 - on))
-            ctx.solver.add_constraint(z <= prior - lower * (1 - on))
-            self._elec_kw[t] = intercept * on + slope * z
+        Args:
+            ctx: The current solve context.
+            t: Zero-based time step index.
+            prior: Start-of-step tank temperature (constant at t=0).
+            lower: Lower bound on ``T_tank`` in °C.
+            upper: Upper bound on ``T_tank`` in °C.
+            k_per_kw: Temperature gain in K over one step per kW of heat.
+        """
+        cfg = self.config
+        elem = cfg.element
+        assert elem is not None
+        elem_on = self._elem_on[t]
+        elem_kw = self._elem_kw[t]
+        # The element only delivers power while active.
+        ctx.solver.add_constraint(elem_kw <= elem.power_kw * elem_on)
+        # ceiling: highest temperature element heating may reach within a
+        # step, in °C. The setpoint is the heating target; the limit is physical.
+        ceiling = min(elem.max_temp_c, cfg.setpoint_c)
+        # Peak ceiling: T_tank[t-1] + elem_kw * dt / cap <= ceiling while
+        # active. When inactive elem_kw is 0 and big-M is the largest possible
+        # excess of the previous temperature, so a hot tank cools passively.
+        big_m = max(0.0, upper - ceiling)
+        ctx.solver.add_constraint(prior + k_per_kw * elem_kw <= ceiling + big_m * (1 - elem_on))
 
     def planned_temp_c(self, ctx: ModelContext, t: int) -> float:
         """Planned tank temperature at the end of step t after a solve, in °C.
@@ -320,17 +398,18 @@ class ThermalBoilerDevice:
         solver variable. The expression evaluates to exactly ``-elec_power_kw``
         when ``heater_on[t]=1`` and to 0 when ``heater_on[t]=0``.
 
+        With heat sources, the draw is the compressor's electric power at the
+        start-of-step tank temperature plus the element power (see
+        ``_add_source_constraints``).
+
         Args:
             t: Zero-based time step index.
 
-        With a compressor, the draw is the compressor's electric power at the
-        start-of-step tank temperature (see ``_add_compressor_constraints``).
-
         Returns:
             Solver expression for ``−elec_power_kw × heater_on[t]``, or the
-            negated compressor power expression.
+            negated heat-source power expression.
         """
-        if self.config.compressor is not None:
+        if self.config.uses_heat_sources():
             return -self._elec_kw[t]
         return -self.config.elec_power_kw * self._heater_on[t]
 
@@ -344,7 +423,10 @@ class ThermalBoilerDevice:
         energy-cost-independent penalty on top of the minimum run constraint.
 
         When ``wear_cost_eur_per_kwh`` is zero (the default), this method
-        returns an empty list and contributes nothing to the objective.
+        returns an empty list and contributes nothing to the objective. With
+        heat sources the penalty applies to the compressor's electric power
+        only; an element-only tank has no wear term. Legacy tanks are
+        unchanged.
 
         Args:
             t: Zero-based time step index.
@@ -354,8 +436,12 @@ class ThermalBoilerDevice:
         """
         if self.config.wear_cost_eur_per_kwh <= 0.0:
             return []
-        if self.config.compressor is not None:
-            return [self.config.wear_cost_eur_per_kwh * self._elec_kw[t] * self._dt]
+        if self.config.uses_heat_sources():
+            # Wear applies to the compressor only; an element has no
+            # compressor to wear out.
+            if self.config.compressor is None:
+                return []
+            return [self.config.wear_cost_eur_per_kwh * self._comp_kw[t] * self._dt]
         return [
             self.config.wear_cost_eur_per_kwh
             * self.config.elec_power_kw

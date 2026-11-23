@@ -283,9 +283,9 @@ on[t+τ]  >= start[t]   for τ in 1..min_run_steps-1, where t+τ < horizon
 
 - *Propagating a `t=0` start explicitly.* `start[t]` is only defined for `t >= 1` (it compares against `t-1`), so the sentinel loop alone does not constrain what happens if the device is already on at `t=0` (e.g. still running from the previous solve cycle, short of the minimum run length). A direct constraint `on[tau] >= on[0]` for `tau` in `1 .. min_run_steps-1` propagates a `t=0` start forward, mirroring what the sentinel enforces for a start at any other step.
 
-### Thermal boiler compressor
+### Thermal boiler heat sources
 
-A thermal boiler configured with `compressor` (instead of the legacy `elec_power_kw` and `cop`) reuses the on/off binary `on[t]` and the start-sentinel minimum run, but changes three things.
+A thermal boiler configured with `compressor` and/or `element` (instead of the legacy `elec_power_kw` and `cop`) is modelled as below. The compressor reuses the on/off binary `on[t]` and the start-sentinel minimum run; an element-only tank has no on/off binary and rejects `min_run_steps > 1`.
 
 **Within-step convention.** Heat is added first and the cooling loss is removed afterwards. The highest temperature inside step `t` is therefore `T_tank[t-1] + rise` and the lowest is the lower endpoint, where `rise = heat_output_kw * dt / (V * c_p)`.
 
@@ -321,6 +321,16 @@ z[t] <= T_tank[t-1] - lower * (1 - on[t])
 With `on[t] = 0` the first two force `z[t] = 0` and the last two are slack; with `on[t] = 1` the last two force `z[t] = T_tank[t-1]` and the first two are slack. `lower = min_temp_c` and `upper` as above are valid bounds on `T_tank[t-1]`, so no feasible schedule is cut off. When `slope = 0` the power does not depend on the tank temperature and `z` is not created.
 
 The compressor runs full steps only (no partial duty within a step), so the product is exact and the minimum run acts on real operation. The config validator checks that the power is finite and positive at the four corners of (tank range x source range); the power is linear in both, so every value in between is positive too.
+
+**Element.** The element converts electricity to heat one to one. Its power `elem_kw[t]` is continuous in `[0, power_kw]`, so it can stop exactly at a target temperature (the executor ends heating when the target is reached). A binary `elem_on[t]` exists only to keep the element out of compressor steps and to switch its ceiling:
+
+```
+elem_kw[t] <= power_kw * elem_on[t]
+on[t] + elem_on[t] <= 1                                   (with a compressor)
+T_tank[t-1] + elem_kw[t] * dt / (V * c_p) <= ceiling_e + M_e * (1 - elem_on[t]),   M_e = max(0, upper - ceiling_e)
+```
+
+with `ceiling_e = min(element.max_temp_c, setpoint_c)`. When `elem_on[t] = 0` the power is 0, and `M_e` is the largest possible excess of the previous temperature over the ceiling, so a tank above the element limit cools passively. The element's electric power has no temperature product, so continuous operation is exact. The tank dynamics add both sources: `T_tank[t] = T_tank[t-1] - cool + rise * on[t] + elem_kw[t] * dt / (V * c_p)`, and the electric draw is the compressor power plus `elem_kw[t]`. The wear cost applies to the compressor power only; an element has no compressor to wear out.
 
 ## Space heating heat pump model
 

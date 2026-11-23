@@ -829,12 +829,12 @@ THERMAL_BOILER_CONFIG_FORM_SPEC = FormSpec(
         ),
         "min_run_steps": FieldSpec(
             label="Minimum run steps",
-            description="Minimum consecutive active steps once started. 0 = free cycling.",
+            description="Minimum consecutive steps the heater or compressor runs once started. 0 = free cycling. Must be 0 or 1 for an element-only tank.",
             tier=Tier.EXPERT,
         ),
         "wear_cost_eur_per_kwh": FieldSpec(
             label="Wear cost (€/kWh)",
-            description="Cycling cost per kWh of electrical consumption, in EUR.",
+            description="Cycling cost per kWh of electrical consumption, in EUR. With heat sources it applies to compressor electricity only.",
             tier=Tier.BASIC,
         ),
         "compressor": FieldSpec(

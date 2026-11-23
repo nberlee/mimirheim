@@ -3088,6 +3088,18 @@ class TestThermalBoilerHeatSources:
         del data["compressor"]
         assert ThermalBoilerConfig.model_validate(data).compressor is None
 
+    def test_element_only_rejects_min_run(self) -> None:
+        """min_run_steps acts on the compressor; an element-only tank has none."""
+        from mimirheim.config.schema import ThermalBoilerConfig
+
+        data = _sources_data()
+        del data["compressor"]
+        data["min_run_steps"] = 4
+        with pytest.raises(ValidationError, match="min_run_steps"):
+            ThermalBoilerConfig.model_validate(data)
+        data["min_run_steps"] = 1
+        assert ThermalBoilerConfig.model_validate(data).min_run_steps == 1
+
     def test_compressor_only_is_legal(self) -> None:
         from mimirheim.config.schema import ThermalBoilerConfig
 

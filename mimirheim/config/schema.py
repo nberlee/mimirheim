@@ -2683,11 +2683,14 @@ class ThermalBoilerConfig(BaseModel):
         min_run_steps: Minimum number of consecutive 15-minute steps the heater
             must remain on once started. Use 0 or 1 for resistive elements (free
             cycling). Use 4 (one hour) for heat pump compressors to avoid
-            short-cycling that accelerates compressor wear.
+            short-cycling that accelerates compressor wear. With heat sources
+            it applies to the compressor; an element-only tank rejects values
+            above 1.
         wear_cost_eur_per_kwh: Optional cycling cost per kWh of electrical
             consumption, in EUR. Add a small value for heat pump compressors to
             further discourage unnecessary cycling beyond the minimum run
-            constraint. Set to 0.0 (default) for resistive elements.
+            constraint. Set to 0.0 (default) for resistive elements. With heat
+            sources it applies to compressor electricity only.
         inputs: Optional MQTT input topic configuration for live water temperature
             readings. When None, the initial temperature must be supplied via
             ``ThermalBoilerInputs.current_temp_c`` in the solve bundle.
@@ -2723,7 +2726,7 @@ class ThermalBoilerConfig(BaseModel):
     min_run_steps: int = Field(
         ge=0,
         default=0,
-        description="Minimum consecutive active steps once started. 0 = free cycling.",
+        description="Minimum consecutive steps the heater or compressor runs once started. 0 = free cycling. Must be 0 or 1 for an element-only tank.",
     )
     wear_cost_eur_per_kwh: float = Field(
         ge=0,
@@ -2733,7 +2736,9 @@ class ThermalBoilerConfig(BaseModel):
             "Adds a small penalty to each kWh consumed, discouraging unnecessary "
             "cycling beyond what the minimum run constraint already enforces. "
             "Meaningful only for heat pump compressors where short-cycling causes "
-            "wear; set to 0.0 (default) for resistive immersion elements."
+            "wear; set to 0.0 (default) for resistive immersion elements. "
+            "With heat sources it applies to compressor electricity only; the "
+            "element has no wear term."
         ),
     )
     compressor: CompressorConfig | None = Field(
@@ -2792,6 +2797,10 @@ class ThermalBoilerConfig(BaseModel):
                     )
             if self.compressor is not None:
                 self._validate_compressor_power(self.compressor)
+            elif self.min_run_steps > 1:
+                # The minimum run acts on the compressor's on/off state; an
+                # element-only tank has none, so the setting would be ignored.
+                raise ValueError("min_run_steps applies to a compressor; an element-only tank has none.")
         elif self.elec_power_kw is None:
             raise ValueError("elec_power_kw is required unless compressor or element is configured.")
         return self
