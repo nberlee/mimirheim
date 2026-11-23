@@ -185,7 +185,12 @@ A hybrid inverter combines battery storage with a directly coupled PV input. The
 
 ### Thermal boiler
 
-An electric resistance boiler with a hot-water tank. Tank temperature is tracked as a decision variable across the horizon. The solver may run the boiler element (`on[t] = 1`) at any step to raise the tank temperature, subject to a minimum tank temperature (to satisfy DHW demand) and a maximum temperature (safety limit). The binary `on[t]` variable incurs a minimum run-time constraint to avoid short cycling.
+A hot-water tank heated by one on/off heater (`elec_power_kw`, optional `cop`). Tank temperature is tracked as a decision variable across the horizon, at or below `setpoint_c`, and the binary `on[t]` carries a minimum run-time constraint to avoid short cycling. Losses use one of two modes:
+
+- **Cooling rate** (`cooling_rate_k_per_hour`): a constant temperature drop per hour that lumps standby loss and typical draws together. The tank must stay at or above `min_temp_c`.
+- **Standby loss** (`standby_loss_w` from the tank's datasheet or energy label, or `standby_loss_kw_per_k`, together with `ambient_temp_c`): the loss is proportional to the tank's temperature above the room. With `use_draw_forecast`, a timestamped hot water draw forecast is subtracted per step, so the tank is heated ahead of expected draws. In this mode the floor `min_temp_c` is soft but prioritised: before anything else, mimirheim minimises the total time-weighted dip below the floor and holds the best result found (plus a 0.001 K·h tolerance) as a hard limit for the rest of the solve. A forecast draw the heater cannot cover therefore no longer makes the whole solve infeasible. When that first step finds zero dip, the later optimisation keeps it within the tolerance; a first step stopped by its time limit may keep an avoidable dip. If that first step finds no solution in its time, the remaining time keeps minimising the dip and the result is marked `strategy_degraded` (see [Objectives and Strategy](#4-objectives-and-strategy)).
+
+The `hot_water_draw` helper estimates the draw forecast from the Home Assistant recorder.
 
 ### Space heating heat pump
 
@@ -475,6 +480,17 @@ Published retained. Required for each configured thermal boiler that has `inputs
 
 ```
 58.3
+```
+
+### Thermal boiler draw forecast: topic from `thermal_boilers.*.inputs.topic_draw_forecast`
+
+Used, and then required, only for a thermal boiler with `use_draw_forecast: true`. Published retained, in the same shape as a static load forecast: `kw` is the average hot water draw in kW of heat over the interval starting at `ts`, and a final point marks the end of the covered horizon. Like the PV and load forecasts it must cover the solve horizon, and its coverage limits it. A payload with a non-finite `kw` is rejected and the previous forecast stays in use.
+
+```json
+[
+  {"ts": "2026-03-30T14:00:00+00:00", "kw": 0.08},
+  {"ts": "2026-03-30T15:00:00+00:00", "kw": 0.06}
+]
 ```
 
 ### Space heating demand — topic from `space_heating_hps.*.inputs.topic_heat_needed_kwh`
@@ -950,14 +966,20 @@ Two limitations apply when fitting the parameters:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `capacity_litres` | float > 0 | — | Tank volume in litres. |
-| `min_temp_c` | float | — | Minimum tank temperature required to satisfy DHW demand (°C). |
-| `max_temp_c` | float | — | Maximum permissible tank temperature (°C). |
-| `heat_loss_coeff_kw_per_k` | float > 0 | — | Tank heat loss coefficient (kW/K). |
-| `element_power_kw` | float > 0 | — | Electrical power of the heating element (kW). |
-| `cop` | float > 0 | 1.0 | Coefficient of performance (1.0 for pure resistance). |
-| `min_run_steps` | int ≥ 0 | 0 | Minimum consecutive steps the element must run once switched on (avoids short cycling). |
+| `volume_liters` | float > 0 | required | Tank volume in litres. |
+| `elec_power_kw` | float > 0 | required | Electric power of the heater when on (kW). |
+| `cop` | float > 0 | 1.0 | Coefficient of performance (1.0 for a resistive element). |
+| `setpoint_c` | float | required | Target hot water temperature (°C); the tank stays at or below it. |
+| `min_temp_c` | float | 40.0 | Minimum tank temperature for DHW demand (°C). Hard with a cooling rate, soft but strictly prioritised in standby loss mode. Must be below `setpoint_c`. |
+| `cooling_rate_k_per_hour` | float ≥ 0 or null | null | Cooling-rate loss mode: temperature drop per hour, draws included (K/h). Exclusive with the standby loss fields. |
+| `standby_loss_w` | float > 0 or null | null | Standby loss mode: standing loss in W from the datasheet or energy label (ErP "S", at a 45 K tank-to-room difference). Exactly one of this and `standby_loss_kw_per_k`. |
+| `standby_loss_kw_per_k` | float > 0 or null | null | Standby loss mode: heat loss in kW per K of tank-to-room difference. |
+| `ambient_temp_c` | float or null | null | Standby loss mode: temperature of the room around the tank (°C). |
+| `use_draw_forecast` | bool | false | Standby loss mode only: subtract a timestamped draw forecast per step. |
+| `min_run_steps` | int ≥ 0 | 0 | Minimum consecutive steps the heater runs once switched on (avoids short cycling). |
+| `wear_cost_eur_per_kwh` | float ≥ 0 | 0.0 | Cycling cost per kWh of electricity. |
 | `inputs.topic_current_temp` | string or null | derived | MQTT topic for the current tank temperature (plain float, °C). Derived as `{prefix}/input/thermal_boiler/{name}/temp_c`. |
+| `inputs.topic_draw_forecast` | string or null | derived | MQTT topic for the draw forecast. Derived as `{prefix}/input/thermal_boiler/{name}/draw_forecast` when `use_draw_forecast` is set. |
 
 #### `space_heating_hps` (dict, keyed by device name)
 
@@ -1071,6 +1093,7 @@ a Home Assistant entity topic) or when sharing a topic between multiple instance
 | `deferrable_loads.{name}.topic_window_latest` | `{p}/input/deferrable/{name}/window_latest` |
 | `deferrable_loads.{name}.topic_committed_start_time` | `{p}/input/deferrable/{name}/committed_start` |
 | `thermal_boilers.{name}.inputs.topic_current_temp` | `{p}/input/thermal_boiler/{name}/temp_c` |
+| `thermal_boilers.{name}.inputs.topic_draw_forecast` (with `use_draw_forecast`) | `{p}/input/thermal_boiler/{name}/draw_forecast` |
 | `space_heating_hps.{name}.inputs.topic_heat_needed_kwh` | `{p}/input/space_heating/{name}/heat_needed_kwh` |
 | `space_heating_hps.{name}.inputs.topic_heat_produced_today_kwh` | `{p}/input/space_heating/{name}/heat_produced_today_kwh` |
 | `space_heating_hps.{name}.building_thermal.inputs.topic_current_indoor_temp_c` | `{p}/input/space_heating/{name}/btm/indoor_temp_c` |
@@ -1149,6 +1172,7 @@ The solve is blocked if `n_steps` falls below `readiness.min_horizon_hours × 4`
 |---|---|
 | `{prefix}/input/prices` | At least `min_horizon_hours` of future coverage |
 | `{pv_arrays.*.topic_forecast}` | At least `min_horizon_hours` of future coverage |
+| `{thermal_boilers.*.inputs.topic_draw_forecast}` (when `use_draw_forecast` is set and `inputs` is configured) | At least `min_horizon_hours` of future coverage |
 | `{static_loads.*.topic_forecast}` | At least `min_horizon_hours` of future coverage |
 
 ### Gap warnings

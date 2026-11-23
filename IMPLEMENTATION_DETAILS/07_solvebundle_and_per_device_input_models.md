@@ -62,8 +62,14 @@ class ThermalBoilerInputs(BaseModel):
     The initial tank temperature is required because the solver must track tank
     temperature as a decision variable across the horizon. Without the initial
     state the first-step constraint cannot be formed.
+
+    With a draw forecast (standby loss mode), draw_kw carries the draw per
+    horizon step and draw_forecast the raw timestamped forecast, which
+    _clip_bundle leaves whole so draws beyond the horizon stay readable.
     """
     current_temp_c: float
+    draw_kw: list[float] | None = None                    # kW thermal per step, finite, >= 0, horizon length
+    draw_forecast: list[PowerForecastStep] | None = None  # raw forecast, not clipped
 
 class SpaceHeatingInputs(BaseModel):
     """Current state for a space heating heat pump.
