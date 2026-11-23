@@ -48,7 +48,7 @@ import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from mimirheim.config.schema import MimirheimConfig
+from mimirheim.config.schema import MimirheimConfig, ThermalBoilerConfig
 from mimirheim.core.battery_care import is_newer, is_older, track_full_charge
 from mimirheim.devices.ev import max_charge_energy_kwh
 from mimirheim.core.bundle import (
@@ -57,6 +57,7 @@ from mimirheim.core.bundle import (
     DeferrableWindow,
     EvInputs,
     HybridInverterInputs,
+    InvalidReading,
     PowerForecastStep,
     PriceStep,
     SolveBundle,
@@ -491,6 +492,26 @@ class ReadinessState:
                 )
             return ""
 
+    def _thermal_source_temp(self, cfg: ThermalBoilerConfig) -> tuple[float | None, bool]:
+        """Return the usable source temperature of a thermal boiler and an invalid flag.
+
+        A missing reading gives ``(None, False)``. A reading stored as
+        ``INVALID_READING`` or outside the compressor's plausible source range
+        gives ``(None, True)``, so the device falls back to the reference
+        temperature and the condition is visible.
+        """
+        if cfg.inputs is None or cfg.inputs.topic_source_temp is None or cfg.compressor is None:
+            return None, False
+        entry = self._entries.get(cfg.inputs.topic_source_temp)
+        if entry is None:
+            return None, False
+        value = entry[0]
+        if isinstance(value, InvalidReading):
+            return None, True
+        if not cfg.compressor.source_temp_min_c <= value <= cfg.compressor.source_temp_max_c:
+            return None, True
+        return float(value), False
+
     def snapshot(self) -> SolveBundle:
         """Assemble and return a SolveBundle from the current state.
 
@@ -718,8 +739,22 @@ class ReadinessState:
                 temp_entry = self._entries.get(cfg.inputs.topic_current_temp)
                 if temp_entry is None:
                     continue
+                source_temp_c, source_temp_invalid = self._thermal_source_temp(cfg)
+                run_entry = (
+                    self._entries.get(cfg.inputs.topic_current_run_minutes)
+                    if cfg.inputs.topic_current_run_minutes is not None
+                    else None
+                )
+                run_minutes = (
+                    run_entry[0]
+                    if run_entry is not None and not isinstance(run_entry[0], InvalidReading)
+                    else None
+                )
                 thermal_boiler_inputs[name] = ThermalBoilerInputs(
                     current_temp_c=temp_entry[0],
+                    source_temp_c=source_temp_c,
+                    source_temp_invalid=source_temp_invalid,
+                    current_run_minutes=run_minutes,
                 )
 
             # Space heating inputs (plan 26): demand + optional BTM fields.

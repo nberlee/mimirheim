@@ -72,6 +72,8 @@ from mimirheim.io.input_parser import (
     parse_price_steps,
     parse_space_heating_demand,
     parse_strategy,
+    parse_current_run_minutes,
+    parse_finite_float,
     parse_thermal_boiler_temp,
 )
 from mimirheim.io.mqtt_publisher import MqttPublisher
@@ -92,6 +94,197 @@ _HA_STATUS_TOPIC = "homeassistant/status"
 # (e.g. when multiple input topics publish simultaneously) would queue
 # redundant solves. Only the first trigger in each burst is acted on.
 _DEBOUNCE_SECONDS: float = 5.0
+
+
+class InputTopicConflictError(ValueError):
+    """An optional input shares an MQTT topic with an incompatible subscription.
+
+    The schema cannot detect this, because the full set of subscriptions is
+    only known here. Startup treats it as a configuration error.
+    """
+
+
+def build_topic_handlers(config: MimirheimConfig) -> dict[str, Any]:
+    """Build a mapping from topic → parser function.
+
+    Module level so that startup can run it as a validation step before any
+    client exists (see ``mimirheim.__main__._try_load_full_config``).
+
+    Args:
+        config: The validated configuration.
+
+    Returns:
+        Dict mapping each expected topic string to a callable that takes
+        a raw bytes payload and returns a validated input object.
+
+    Raises:
+        InputTopicConflictError: If an optional thermal boiler compressor
+            input shares a topic with an incompatible subscription.
+    """
+    handlers: dict[str, Any] = {}
+    prefix = config.mqtt.topic_prefix
+
+    # Price topics: each parses independently into a list[PriceStep];
+    # ReadinessState merges the configured topics at snapshot time.
+    for prices_topic in config.inputs.prices:
+        handlers[prices_topic] = parse_price_steps
+
+    # Strategy topic: parse the strategy string.
+    strategy_topic = f"{prefix}/input/strategy"
+    handlers[strategy_topic] = parse_strategy
+
+    # Battery SOC topics: parse to float (kWh).
+    for bat_cfg in config.batteries.values():
+        if bat_cfg.inputs is not None:
+            topic = bat_cfg.inputs.soc.topic
+
+            def _make_bat_parser(capacity_kwh: float, unit: str) -> Any:
+                def _parse_bat(raw: bytes) -> float:
+                    soc = parse_battery_inputs(raw)
+                    if unit == "percent":
+                        return soc * capacity_kwh / 100.0
+                    return soc
+
+                return _parse_bat
+
+            handlers[topic] = _make_bat_parser(
+                bat_cfg.capacity_kwh, bat_cfg.inputs.soc.unit
+            )
+
+    # Battery full-charge policy status. mimirheim publishes this topic
+    # itself, retained, and subscribes to its own output so the broker
+    # replays the last-measured-full timestamp on connect. That round trip
+    # is the persistence: without it the policy would restart from "never
+    # seen full" on every deploy and never complete a balance charge.
+    # Only subscribed for batteries that enable the policy, so nothing
+    # changes for a configuration that leaves it off.
+    for bat_cfg in config.batteries.values():
+        if bat_cfg.soc_ratchet.enabled and bat_cfg.outputs.soc_ratchet is not None:
+            handlers[bat_cfg.outputs.soc_ratchet] = parse_battery_care
+
+    # EV SOC topics + plug state.
+    for ev_cfg in config.ev_chargers.values():
+        if ev_cfg.inputs is not None:
+            def _make_ev_soc_parser(capacity_kwh: float, unit: str) -> Any:
+                def _parse_ev_soc(raw: bytes) -> Any:
+                    state = parse_ev_inputs(raw)
+                    if unit == "percent":
+                        # Only the SOC reading is unit-converted;
+                        # target_soc_kwh is always kWh by contract.
+                        state.soc = state.soc * capacity_kwh / 100.0
+                    return state
+
+                return _parse_ev_soc
+
+            handlers[ev_cfg.inputs.soc.topic] = _make_ev_soc_parser(
+                ev_cfg.capacity_kwh, ev_cfg.inputs.soc.unit
+            )
+            # Plug state: parse to bool.
+            plug_topic = ev_cfg.inputs.plugged_in_topic
+
+            def _parse_plug(raw: bytes) -> bool:
+                text = raw.decode("utf-8").strip().lower()
+                if text in ("true", "on", "1", '"true"', "yes"):
+                    return True
+                if text in ("false", "off", "0", '"false"', "no"):
+                    return False
+                raise ValueError(f"Unrecognised plug state payload: {text!r}")
+
+            handlers[plug_topic] = _parse_plug
+
+    # PV forecast topics: parse to list[PowerForecastStep].
+    for pv_cfg in config.pv_arrays.values():
+        handlers[pv_cfg.topic_forecast] = parse_power_forecast
+
+    # Static load forecast topics: parse to list[PowerForecastStep].
+    for sl_cfg in config.static_loads.values():
+        handlers[sl_cfg.topic_forecast] = parse_power_forecast
+
+    # Deferrable window topics and optional start_time topics: parse to datetime.
+    for dl_cfg in config.deferrable_loads.values():
+        handlers[dl_cfg.topic_window_earliest] = parse_datetime
+        handlers[dl_cfg.topic_window_latest] = parse_datetime
+        if dl_cfg.topic_committed_start_time is not None:
+            handlers[dl_cfg.topic_committed_start_time] = parse_datetime
+
+    # Hybrid inverter SOC and PV forecast topics (plan 24).
+    for hi_cfg in config.hybrid_inverters.values():
+        if hi_cfg.inputs is not None:
+            soc_topic = hi_cfg.inputs.soc.topic
+
+            def _make_hi_soc_parser(capacity_kwh: float, unit: str) -> Any:
+                def _parse_hi_soc(raw: bytes) -> float:
+                    soc = parse_hybrid_inverter_soc(raw)
+                    if unit == "percent":
+                        return soc * capacity_kwh / 100.0
+                    return soc
+
+                return _parse_hi_soc
+
+            handlers[soc_topic] = _make_hi_soc_parser(
+                hi_cfg.capacity_kwh, hi_cfg.inputs.soc.unit
+            )
+        handlers[hi_cfg.topic_pv_forecast] = parse_power_forecast
+
+    # Thermal boiler temperature topics (plan 25).
+    for tb_cfg in config.thermal_boilers.values():
+        if tb_cfg.inputs is not None:
+            handlers[tb_cfg.inputs.topic_current_temp] = parse_thermal_boiler_temp
+
+    # Space heating heat pump demand topics (plan 26).
+    for sh_cfg in config.space_heating_hps.values():
+        if sh_cfg.inputs is not None:
+            handlers[sh_cfg.inputs.topic_heat_needed_kwh] = parse_space_heating_demand
+        # BTM indoor temp and outdoor forecast topics (plan 28).
+        if sh_cfg.building_thermal is not None and sh_cfg.building_thermal.inputs is not None:
+            btm_inputs = sh_cfg.building_thermal.inputs
+            handlers[btm_inputs.topic_current_indoor_temp_c] = parse_current_indoor_temp
+            handlers[btm_inputs.topic_outdoor_temp_forecast_c] = parse_outdoor_temp_forecast
+
+    # Combi heat pump DHW temp + SH demand topics (plan 27).
+    for chp_cfg in config.combi_heat_pumps.values():
+        if chp_cfg.inputs is not None:
+            handlers[chp_cfg.inputs.topic_current_temp] = parse_combi_hp_temp
+            handlers[chp_cfg.inputs.topic_heat_needed_kwh] = parse_combi_hp_sh_demand
+        # BTM indoor temp and outdoor forecast topics (plan 28).
+        if chp_cfg.building_thermal is not None and chp_cfg.building_thermal.inputs is not None:
+            btm_inputs = chp_cfg.building_thermal.inputs
+            handlers[btm_inputs.topic_current_indoor_temp_c] = parse_current_indoor_temp
+            handlers[btm_inputs.topic_outdoor_temp_forecast_c] = parse_outdoor_temp_forecast
+
+    # Optional thermal boiler compressor inputs, registered last so that
+    # every other subscription is known. Their parsers store an INVALID
+    # marker instead of raising, so sharing a topic with an input of a
+    # different kind would either put that marker into a required value
+    # or let the other parser win. Sharing with the same parser (two
+    # tanks reading one source sensor) is safe.
+    special_topics = {
+        f"{prefix}/input/trigger",
+        _HA_STATUS_TOPIC,
+        config_service.REQUEST_TOPIC,
+        config_service.GET_CURRENT_VALUES_REQUEST_TOPIC,
+        config_service.RESTART_REQUEST_TOPIC,
+    }
+    for tb_name, tb_cfg in config.thermal_boilers.items():
+        if tb_cfg.inputs is None:
+            continue
+        optional = (
+            ("topic_source_temp", parse_finite_float),
+            ("topic_current_run_minutes", parse_current_run_minutes),
+        )
+        for field, parser in optional:
+            topic = getattr(tb_cfg.inputs, field)
+            if topic is None:
+                continue
+            existing = handlers.get(topic)
+            if topic in special_topics or (existing is not None and existing is not parser):
+                raise InputTopicConflictError(
+                    f"thermal_boilers.{tb_name}.inputs.{field} ({topic!r}) is already used by "
+                    "another input; compressor inputs need their own topic."
+                )
+            handlers[topic] = parser
+
+    return handlers
 
 
 class MqttClient:
@@ -540,141 +733,7 @@ class MqttClient:
     def _build_topic_handlers(self) -> dict[str, Any]:
         """Build a mapping from topic → parser function.
 
-        Returns:
-            Dict mapping each expected topic string to a callable that takes
-            a raw bytes payload and returns a validated input object.
+        See ``build_topic_handlers``.
         """
-        handlers: dict[str, Any] = {}
-        config = self._config
-        prefix = config.mqtt.topic_prefix
-
-        # Price topics: each parses independently into a list[PriceStep];
-        # ReadinessState merges the configured topics at snapshot time.
-        for prices_topic in config.inputs.prices:
-            handlers[prices_topic] = parse_price_steps
-
-        # Strategy topic: parse the strategy string.
-        strategy_topic = f"{prefix}/input/strategy"
-        handlers[strategy_topic] = parse_strategy
-
-        # Battery SOC topics: parse to float (kWh).
-        for bat_cfg in config.batteries.values():
-            if bat_cfg.inputs is not None:
-                topic = bat_cfg.inputs.soc.topic
-
-                def _make_bat_parser(capacity_kwh: float, unit: str) -> Any:
-                    def _parse_bat(raw: bytes) -> float:
-                        soc = parse_battery_inputs(raw)
-                        if unit == "percent":
-                            return soc * capacity_kwh / 100.0
-                        return soc
-
-                    return _parse_bat
-
-                handlers[topic] = _make_bat_parser(
-                    bat_cfg.capacity_kwh, bat_cfg.inputs.soc.unit
-                )
-
-        # Battery full-charge policy status. mimirheim publishes this topic
-        # itself, retained, and subscribes to its own output so the broker
-        # replays the last-measured-full timestamp on connect. That round trip
-        # is the persistence: without it the policy would restart from "never
-        # seen full" on every deploy and never complete a balance charge.
-        # Only subscribed for batteries that enable the policy, so nothing
-        # changes for a configuration that leaves it off.
-        for bat_cfg in config.batteries.values():
-            if bat_cfg.soc_ratchet.enabled and bat_cfg.outputs.soc_ratchet is not None:
-                handlers[bat_cfg.outputs.soc_ratchet] = parse_battery_care
-
-        # EV SOC topics + plug state.
-        for ev_cfg in config.ev_chargers.values():
-            if ev_cfg.inputs is not None:
-                def _make_ev_soc_parser(capacity_kwh: float, unit: str) -> Any:
-                    def _parse_ev_soc(raw: bytes) -> Any:
-                        state = parse_ev_inputs(raw)
-                        if unit == "percent":
-                            # Only the SOC reading is unit-converted;
-                            # target_soc_kwh is always kWh by contract.
-                            state.soc = state.soc * capacity_kwh / 100.0
-                        return state
-
-                    return _parse_ev_soc
-
-                handlers[ev_cfg.inputs.soc.topic] = _make_ev_soc_parser(
-                    ev_cfg.capacity_kwh, ev_cfg.inputs.soc.unit
-                )
-                # Plug state: parse to bool.
-                plug_topic = ev_cfg.inputs.plugged_in_topic
-
-                def _parse_plug(raw: bytes) -> bool:
-                    text = raw.decode("utf-8").strip().lower()
-                    if text in ("true", "on", "1", '"true"', "yes"):
-                        return True
-                    if text in ("false", "off", "0", '"false"', "no"):
-                        return False
-                    raise ValueError(f"Unrecognised plug state payload: {text!r}")
-
-                handlers[plug_topic] = _parse_plug
-
-        # PV forecast topics: parse to list[PowerForecastStep].
-        for pv_cfg in config.pv_arrays.values():
-            handlers[pv_cfg.topic_forecast] = parse_power_forecast
-
-        # Static load forecast topics: parse to list[PowerForecastStep].
-        for sl_cfg in config.static_loads.values():
-            handlers[sl_cfg.topic_forecast] = parse_power_forecast
-
-        # Deferrable window topics and optional start_time topics: parse to datetime.
-        for dl_cfg in config.deferrable_loads.values():
-            handlers[dl_cfg.topic_window_earliest] = parse_datetime
-            handlers[dl_cfg.topic_window_latest] = parse_datetime
-            if dl_cfg.topic_committed_start_time is not None:
-                handlers[dl_cfg.topic_committed_start_time] = parse_datetime
-
-        # Hybrid inverter SOC and PV forecast topics (plan 24).
-        for hi_cfg in config.hybrid_inverters.values():
-            if hi_cfg.inputs is not None:
-                soc_topic = hi_cfg.inputs.soc.topic
-
-                def _make_hi_soc_parser(capacity_kwh: float, unit: str) -> Any:
-                    def _parse_hi_soc(raw: bytes) -> float:
-                        soc = parse_hybrid_inverter_soc(raw)
-                        if unit == "percent":
-                            return soc * capacity_kwh / 100.0
-                        return soc
-
-                    return _parse_hi_soc
-
-                handlers[soc_topic] = _make_hi_soc_parser(
-                    hi_cfg.capacity_kwh, hi_cfg.inputs.soc.unit
-                )
-            handlers[hi_cfg.topic_pv_forecast] = parse_power_forecast
-
-        # Thermal boiler temperature topics (plan 25).
-        for tb_cfg in config.thermal_boilers.values():
-            if tb_cfg.inputs is not None:
-                handlers[tb_cfg.inputs.topic_current_temp] = parse_thermal_boiler_temp
-
-        # Space heating heat pump demand topics (plan 26).
-        for sh_cfg in config.space_heating_hps.values():
-            if sh_cfg.inputs is not None:
-                handlers[sh_cfg.inputs.topic_heat_needed_kwh] = parse_space_heating_demand
-            # BTM indoor temp and outdoor forecast topics (plan 28).
-            if sh_cfg.building_thermal is not None and sh_cfg.building_thermal.inputs is not None:
-                btm_inputs = sh_cfg.building_thermal.inputs
-                handlers[btm_inputs.topic_current_indoor_temp_c] = parse_current_indoor_temp
-                handlers[btm_inputs.topic_outdoor_temp_forecast_c] = parse_outdoor_temp_forecast
-
-        # Combi heat pump DHW temp + SH demand topics (plan 27).
-        for chp_cfg in config.combi_heat_pumps.values():
-            if chp_cfg.inputs is not None:
-                handlers[chp_cfg.inputs.topic_current_temp] = parse_combi_hp_temp
-                handlers[chp_cfg.inputs.topic_heat_needed_kwh] = parse_combi_hp_sh_demand
-            # BTM indoor temp and outdoor forecast topics (plan 28).
-            if chp_cfg.building_thermal is not None and chp_cfg.building_thermal.inputs is not None:
-                btm_inputs = chp_cfg.building_thermal.inputs
-                handlers[btm_inputs.topic_current_indoor_temp_c] = parse_current_indoor_temp
-                handlers[btm_inputs.topic_outdoor_temp_forecast_c] = parse_outdoor_temp_forecast
-
-        return handlers
+        return build_topic_handlers(self._config)
 

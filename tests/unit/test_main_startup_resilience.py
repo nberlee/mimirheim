@@ -197,3 +197,33 @@ class TestRunAwaitingConfiguration:
                 _run_awaiting_configuration(broker_settings, config_path, "grid: Field required")
 
         assert "grid: Field required" in caplog.text
+
+    def test_input_topic_conflict_returns_none_and_a_detail(self) -> None:
+        """A topic conflict the schema cannot see enters Awaiting Configuration, not a crash."""
+        raw = {
+            "mqtt": {"host": "localhost"},
+            "grid": {"import_limit_kw": 10.0, "export_limit_kw": 5.0},
+            "thermal_boilers": {
+                "dhw": {
+                    "volume_liters": 180.0,
+                    "setpoint_c": 55.0,
+                    "min_temp_c": 40.0,
+                    "cooling_rate_k_per_hour": 1.5,
+                    "compressor": {
+                        "heat_output_kw": 4.5,
+                        "elec_kw_at_temp": [
+                            {"temp_c": 35.0, "elec_kw": 1.1},
+                            {"temp_c": 58.0, "elec_kw": 1.9},
+                        ],
+                        "max_temp_c": 55.0,
+                    },
+                    "inputs": {"topic_source_temp": "mimir/input/thermal_boiler/dhw/temp_c"},
+                }
+            },
+        }
+
+        config, detail = _try_load_full_config(raw, None)
+
+        assert config is None
+        assert detail is not None
+        assert "thermal_boilers.dhw.inputs.topic_source_temp" in detail

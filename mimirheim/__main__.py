@@ -49,7 +49,7 @@ from mimirheim.core.control_arbitration import assign_control_authority
 from mimirheim.core.readiness import ReadinessState
 from mimirheim.io.awaiting_configuration import AwaitingConfigurationClient
 from mimirheim.io.config_service import apply_mqtt_env_overrides
-from mimirheim.io.mqtt_client import MqttClient
+from mimirheim.io.mqtt_client import InputTopicConflictError, MqttClient, build_topic_handlers
 from mimirheim.io.mqtt_publisher import MqttPublisher
 
 logger = logging.getLogger("mimirheim")
@@ -268,14 +268,22 @@ def _try_load_full_config(
     Returns:
         ``(config, None)`` if the file validates in full. ``(None, detail)``
         otherwise, where ``detail`` is ``load_error`` when set, or a
-        human-readable summary of the Pydantic ``ValidationError``.
+        human-readable summary of the Pydantic ``ValidationError`` or the
+        ``InputTopicConflictError``.
     """
     if load_error is not None:
         return None, load_error
     try:
-        return MimirheimConfig.model_validate(raw), None
+        config = MimirheimConfig.model_validate(raw)
     except ValidationError as exc:
         return None, str(exc)
+    # Topic conflicts depend on the complete subscription set, which only
+    # the MQTT layer knows. Running it here keeps a conflict recoverable.
+    try:
+        build_topic_handlers(config)
+    except InputTopicConflictError as exc:
+        return None, str(exc)
+    return config, None
 
 
 def _build_paho_client(mqtt: MqttConfig) -> paho.Client:

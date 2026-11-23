@@ -2508,9 +2508,30 @@ class ThermalBoilerInputsConfig(BaseModel):
             in degrees Celsius. The payload must be a plain numeric string or
             a JSON number. The topic must be retained so mimirheim receives the
             most recent value on reconnect.
+        topic_source_temp: Optional MQTT topic publishing the compressor's heat
+            source temperature in degrees Celsius (for example brine in). Only
+            used with a compressor; never required for a solve.
+        topic_current_run_minutes: Optional MQTT topic publishing how many
+            minutes the compressor has been running (0 when off). Only used
+            with a compressor; never required for a solve.
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    topic_source_temp: str | None = Field(
+        default=None,
+        description=(
+            "MQTT topic publishing the compressor heat source temperature in °C, retained. "
+            "Defaults to '{mqtt.topic_prefix}/input/thermal_boiler/{name}/source_temp_c' when a compressor is configured."
+        ),
+    )
+    topic_current_run_minutes: str | None = Field(
+        default=None,
+        description=(
+            "MQTT topic publishing how long the compressor has been running, in minutes, retained. "
+            "Defaults to '{mqtt.topic_prefix}/input/thermal_boiler/{name}/current_run_minutes' when a compressor is configured."
+        ),
+    )
 
     topic_current_temp: str | None = Field(
         default=None,
@@ -3266,6 +3287,12 @@ class MimirheimConfig(BaseModel):
         for name, cfg in self.thermal_boilers.items():
             if cfg.inputs is not None and cfg.inputs.topic_current_temp is None:
                 cfg.inputs.topic_current_temp = _topics.thermal_boiler_temp_topic(p, name)
+            if cfg.inputs is not None and cfg.compressor is not None:
+                if cfg.inputs.topic_source_temp is None:
+                    cfg.inputs.topic_source_temp = _topics.thermal_boiler_source_temp_topic(p, name)
+                if cfg.inputs.topic_current_run_minutes is None:
+                    cfg.inputs.topic_current_run_minutes = _topics.thermal_boiler_current_run_minutes_topic(p, name)
+
 
         for name, cfg in self.space_heating_hps.items():
             if cfg.inputs is not None:

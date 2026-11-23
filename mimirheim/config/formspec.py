@@ -725,6 +725,16 @@ THERMAL_BOILER_INPUTS_FORM_SPEC = FormSpec(
             description="MQTT topic publishing the current water temperature in degrees C, retained.",
             tier=Tier.EXPERT,
         ),
+        "topic_source_temp": FieldSpec(
+            label="Source temperature topic",
+            description="Optional MQTT topic publishing the compressor heat source temperature in degrees C, retained.",
+            tier=Tier.EXPERT,
+        ),
+        "topic_current_run_minutes": FieldSpec(
+            label="Current run time topic",
+            description="Optional MQTT topic publishing how long the compressor has been running, in minutes, retained.",
+            tier=Tier.EXPERT,
+        ),
     }
 )
 

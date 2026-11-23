@@ -243,6 +243,28 @@ class CombiHeatPumpInputs(BaseModel):
     )
 
 
+class InvalidReading:
+    """Marker type for an optional numeric MQTT reading that could not be used.
+
+    Defined here rather than in the IO layer so that ``core.readiness`` can
+    recognise it without importing from ``mimirheim.io``.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "INVALID_READING"
+
+
+INVALID_READING = InvalidReading()
+"""Stored instead of raising for optional numeric inputs.
+
+A parser that raises makes the MQTT client skip ``readiness.update()``, which
+would keep the previous valid value. Storing this marker replaces that value,
+so a broken sensor is seen as broken instead of frozen.
+"""
+
+
 class ThermalBoilerInputs(BaseModel):
     """Live thermal boiler state received from MQTT, validated at the system boundary.
 
@@ -250,12 +272,28 @@ class ThermalBoilerInputs(BaseModel):
         current_temp_c: Current water temperature in degrees Celsius, as read
             from the tank sensor. The solver uses this as the initial temperature
             for the first step's temperature-dynamics constraint.
+        source_temp_c: Compressor heat source temperature in degrees Celsius,
+            or None when unknown or unusable. The device then uses the
+            configured reference temperature.
+        source_temp_invalid: True when a source temperature was received but
+            was not finite or lay outside the configured plausible range.
+        current_run_minutes: How long the compressor has been running when
+            the solve starts, in minutes (0 when off), or None when unknown.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     current_temp_c: float = Field(
         description="Current water temperature in °C, as read from sensor."
+    )
+    source_temp_c: float | None = Field(
+        default=None, allow_inf_nan=False, description="Compressor heat source temperature in °C, or None."
+    )
+    source_temp_invalid: bool = Field(
+        default=False, description="True when a received source temperature was unusable."
+    )
+    current_run_minutes: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False, description="Minutes the compressor has been running, or None."
     )
 
 

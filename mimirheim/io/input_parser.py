@@ -26,10 +26,11 @@ dependency.
 """
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from mimirheim.core.bundle import PowerForecastStep, PriceStep
+from mimirheim.core.bundle import INVALID_READING, InvalidReading, PowerForecastStep, PriceStep
 
 _VALID_STRATEGIES = {"minimize_cost", "minimize_consumption", "balanced"}
 
@@ -427,6 +428,40 @@ def parse_hybrid_inverter_soc(payload: bytes | str) -> float:
         raise ValueError(
             f"Hybrid inverter SOC payload is not a valid number: {text!r}"
         ) from exc
+
+
+def parse_finite_float(payload: bytes | str) -> float | InvalidReading:
+    """Parse an optional numeric reading, returning ``INVALID_READING`` when unusable.
+
+    Args:
+        payload: Raw MQTT payload, a plain number or JSON number.
+
+    Returns:
+        The value as a finite float, or ``INVALID_READING`` for a payload that
+        is not UTF-8, not a number, NaN or infinite.
+    """
+    try:
+        # UnicodeDecodeError is a ValueError, so a non-UTF-8 payload is
+        # stored as INVALID too rather than skipped.
+        value = float(_decode(payload).strip())
+    except ValueError:
+        return INVALID_READING
+    return value if math.isfinite(value) else INVALID_READING
+
+
+def parse_current_run_minutes(payload: bytes | str) -> float | InvalidReading:
+    """Parse how long a compressor has been running, in minutes.
+
+    Args:
+        payload: Raw MQTT payload, a plain number or JSON number.
+
+    Returns:
+        A finite, non-negative float, or ``INVALID_READING`` otherwise.
+    """
+    value = parse_finite_float(payload)
+    if isinstance(value, InvalidReading) or value < 0:
+        return INVALID_READING
+    return value
 
 
 def parse_thermal_boiler_temp(payload: bytes | str) -> float:

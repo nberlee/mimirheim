@@ -337,6 +337,36 @@ def thermal_boiler_temp_topic(prefix: str, name: str) -> str:
     return f"{prefix}/input/thermal_boiler/{name}/temp_c"
 
 
+def thermal_boiler_source_temp_topic(prefix: str, name: str) -> str:
+    """Return the topic for a thermal boiler compressor's heat source temperature.
+
+    Corresponds to ``thermal_boilers.{name}.inputs.topic_source_temp``.
+
+    Args:
+        prefix: The ``mqtt.topic_prefix`` value from mimirheim config.
+        name: The thermal boiler device name.
+
+    Returns:
+        e.g. ``"mimir/input/thermal_boiler/dhw_boiler/source_temp_c"``.
+    """
+    return f"{prefix}/input/thermal_boiler/{name}/source_temp_c"
+
+
+def thermal_boiler_current_run_minutes_topic(prefix: str, name: str) -> str:
+    """Return the topic for how long a thermal boiler compressor has been running.
+
+    Corresponds to ``thermal_boilers.{name}.inputs.topic_current_run_minutes``.
+
+    Args:
+        prefix: The ``mqtt.topic_prefix`` value from mimirheim config.
+        name: The thermal boiler device name.
+
+    Returns:
+        e.g. ``"mimir/input/thermal_boiler/dhw_boiler/current_run_minutes"``.
+    """
+    return f"{prefix}/input/thermal_boiler/{name}/current_run_minutes"
+
+
 def space_heating_heat_needed_topic(prefix: str, name: str) -> str:
     """Return the topic for the space heating HP heat demand.
 
