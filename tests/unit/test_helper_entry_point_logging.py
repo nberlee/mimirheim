@@ -43,6 +43,7 @@ _LOGGING_ENTRY_POINTS = [
     ("baseload_ha", "baseload_ha"),
     ("baseload_ha_db", "baseload_ha_db"),
     ("baseload_static", "baseload_static"),
+    ("hot_water_draw", "hot_water_draw"),
     ("config_editor", "config_editor"),
 ]
 
@@ -54,6 +55,7 @@ _ENTRY_POINT_SOURCES = [
     "mimirheim_helpers/baseload/homeassistant/baseload_ha/__main__.py",
     "mimirheim_helpers/baseload/homeassistant_db/baseload_ha_db/__main__.py",
     "mimirheim_helpers/baseload/static/baseload_static/__main__.py",
+    "mimirheim_helpers/hot_water/homeassistant_db/hot_water_draw/__main__.py",
     "mimirheim_helpers/pv/forecast.solar/pv_fetcher/__main__.py",
     "mimirheim_helpers/pv/open-meteo/pv_openmeteo/__main__.py",
     "mimirheim_helpers/pv/pv_ml_learner/pv_ml_learner/__main__.py",

@@ -1,10 +1,10 @@
 """Configuration models of the hot water draw helper.
 
-This module defines the recorder, tank and estimation settings that the
-recorder reader and the estimator use. The MQTT and daemon settings and the
-editor FormSpec are added with the daemon; this module does not connect to
-anything and does not import from mimirheim core (helpers import only
-``helper_common``).
+This module defines the root ``HotWaterDrawConfig`` (MQTT, topics, optional
+Home Assistant discovery) and the recorder, tank and estimation settings the
+recorder reader and the estimator use. It does not connect to anything and
+does not import from mimirheim core (helpers import only ``helper_common``).
+The editor presentation lives in ``hot_water_draw.formspec``.
 """
 
 from __future__ import annotations
@@ -13,6 +13,11 @@ from typing import Literal, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+import helper_common.topics as _topics
+from helper_common.config import HomeAssistantConfig, MqttConfig
+
+DEFAULT_CLIENT_ID = "mimir-hot-water-draw"
 
 # Tank-to-room temperature difference at which the ErP / EN 12897 standing
 # loss "S" of a hot water tank is measured, in K. Same convention as
@@ -166,3 +171,88 @@ class ModelConfig(BaseModel):
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise ValueError(f"unknown IANA time zone {value!r}") from exc
         return value
+
+
+class HotWaterDrawConfig(BaseModel):
+    """Root configuration of the hot water draw helper.
+
+    Attributes:
+        mqtt: MQTT broker connection settings. ``client_id`` defaults to
+            ``mimir-hot-water-draw``.
+        mimir_topic_prefix: The ``mqtt.topic_prefix`` configured in mimirheim.
+        mimir_thermal_boiler_name: The ``thermal_boilers`` device name in the
+            mimirheim config this helper publishes to.
+        trigger_topic: A message on this topic fires one cycle. Defaults to
+            ``{mimir_topic_prefix}/input/tools/hot_water/trigger``.
+        output_topic: Retained draw forecast topic. Defaults to the mimirheim
+            draw forecast topic of ``mimir_thermal_boiler_name``.
+        signal_mimir: Publish to ``mimir_trigger_topic`` after a forecast.
+        mimir_trigger_topic: mimirheim trigger topic. Derived when not set.
+        stats_topic: Retained per-cycle run statistics published by the
+            shared helper daemon.
+        quality_topic: Retained estimate diagnostics published after each
+            successful cycle (best effort).
+        ha_discovery: Optional Home Assistant MQTT discovery settings.
+        homeassistant: Recorder database connection and entities.
+        tank: Physical properties of the tank.
+        model: Estimation settings.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mqtt: MqttConfig = Field(description="MQTT broker connection settings.")
+    mimir_topic_prefix: str = Field(
+        default="mimir", description="mimirheim mqtt.topic_prefix. Used to derive default topics."
+    )
+    mimir_thermal_boiler_name: str = Field(
+        default="dhw", description="mimirheim thermal_boilers device name this helper publishes to."
+    )
+    trigger_topic: str | None = Field(
+        default=None,
+        description="MQTT topic that triggers a cycle. Defaults to '{mimir_topic_prefix}/input/tools/hot_water/trigger'.",
+    )
+    output_topic: str | None = Field(
+        default=None,
+        description=(
+            "MQTT topic for the retained draw forecast. "
+            "Defaults to '{mimir_topic_prefix}/input/thermal_boiler/{mimir_thermal_boiler_name}/draw_forecast'."
+        ),
+    )
+    signal_mimir: bool = Field(default=False, description="Publish to mimir_trigger_topic after publishing the forecast.")
+    mimir_trigger_topic: str | None = Field(
+        default=None, description="mimirheim trigger topic. Derives from mimir_topic_prefix when not set."
+    )
+    stats_topic: str | None = Field(default=None, description="MQTT topic where per-cycle run statistics are published.")
+    quality_topic: str | None = Field(default=None, description="MQTT topic where estimate diagnostics are published.")
+    ha_discovery: HomeAssistantConfig | None = Field(
+        default=None, description="Optional Home Assistant MQTT discovery settings."
+    )
+    homeassistant: RecorderConfig = Field(description="Recorder database connection and entities.")
+    tank: TankConfig = Field(description="Physical properties of the tank.")
+    model: ModelConfig = Field(default_factory=ModelConfig, description="Estimation settings.")
+
+    @model_validator(mode="after")
+    def _derive_mimir_topics(self) -> "HotWaterDrawConfig":
+        """Fill in mimirheim-side topics that were not explicitly set."""
+        p = self.mimir_topic_prefix
+        if self.trigger_topic is None:
+            self.trigger_topic = _topics.helper_trigger_topic(p, "hot_water")
+        if self.output_topic is None:
+            self.output_topic = _topics.thermal_boiler_draw_forecast_topic(p, self.mimir_thermal_boiler_name)
+        if self.mimir_trigger_topic is None:
+            self.mimir_trigger_topic = _topics.trigger_topic(p)
+        return self
+
+    @model_validator(mode="after")
+    def _require_trigger_topic_when_signalling(self) -> "HotWaterDrawConfig":
+        """Reject an empty mimirheim trigger topic when signalling is enabled."""
+        if self.signal_mimir and not self.mimir_trigger_topic:
+            raise ValueError("mimir_trigger_topic must not be empty when signal_mimir is true")
+        return self
+
+    @model_validator(mode="after")
+    def _set_client_id_default(self) -> "HotWaterDrawConfig":
+        """Set the default MQTT client identifier when not explicitly configured."""
+        if not self.mqtt.client_id:
+            self.mqtt.client_id = DEFAULT_CLIENT_ID
+        return self

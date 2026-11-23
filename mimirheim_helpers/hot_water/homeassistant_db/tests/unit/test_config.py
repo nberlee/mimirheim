@@ -106,3 +106,38 @@ def test_valid_timezones_are_accepted(zone: str) -> None:
 def test_invalid_timezones_are_rejected(zone: str) -> None:
     with pytest.raises(ValidationError, match="time zone"):
         ModelConfig(timezone=zone)
+
+
+def _root(**overrides: object) -> dict:
+    data: dict = {
+        "mqtt": {"host": "localhost"},
+        "homeassistant": {
+            "db_url": "sqlite:////config/home-assistant_v2.db",
+            "tank_temperature_entities": [{"entity_id": "sensor.tank_top"}],
+            "heat_sources": [{"energy_entity": "sensor.dhw_energy", "cop": 2.5}],
+        },
+        "tank": {"volume_liters": 180.0, "standby_loss_w": 90.0, "ambient_temp_c": 18.0},
+    }
+    data.update(overrides)
+    return data
+
+
+def test_root_derives_its_topics_and_client_id() -> None:
+    from hot_water_draw.config import HotWaterDrawConfig
+
+    cfg = HotWaterDrawConfig.model_validate(_root())
+    assert cfg.output_topic == "mimir/input/thermal_boiler/dhw/draw_forecast"
+    assert cfg.trigger_topic == "mimir/input/tools/hot_water/trigger"
+    assert cfg.mimir_trigger_topic == "mimir/input/trigger"
+    assert cfg.mqtt.client_id == "mimir-hot-water-draw"
+    named = HotWaterDrawConfig.model_validate(_root(mimir_topic_prefix="home", mimir_thermal_boiler_name="tank"))
+    assert named.output_topic == "home/input/thermal_boiler/tank/draw_forecast"
+
+
+def test_root_rejects_unknown_fields_and_empty_signal_topic() -> None:
+    from hot_water_draw.config import HotWaterDrawConfig
+
+    with pytest.raises(ValidationError):
+        HotWaterDrawConfig.model_validate(_root(surprise=1))
+    with pytest.raises(ValidationError, match="mimir_trigger_topic"):
+        HotWaterDrawConfig.model_validate(_root(signal_mimir=True, mimir_trigger_topic=""))

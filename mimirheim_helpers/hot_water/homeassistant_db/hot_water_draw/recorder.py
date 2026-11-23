@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import quote, quote_plus
 
@@ -297,6 +298,66 @@ def _resolve_unit(conn: Connection, entity_id: str, override: str | None) -> str
     return override if override is not None else row[0]
 
 
+def _energy_factor(conn: Connection, source: HeatSourceConfig) -> float:
+    """Return the kWh factor of a heat source's counter unit.
+
+    Raises:
+        RecorderError: If the entity has no statistics or no energy unit.
+    """
+    unit = _resolve_unit(conn, source.energy_entity, source.unit)
+    if unit not in _ENERGY_UNIT_TO_KWH:
+        raise RecorderError(
+            f"Entity {source.energy_entity} has unit {unit!r}; an energy unit "
+            f"({', '.join(_ENERGY_UNIT_TO_KWH)}) is required."
+        )
+    return _ENERGY_UNIT_TO_KWH[unit]
+
+
+def _temperature_converter(conn: Connection, entity: TankTemperatureEntityConfig) -> Callable[[float], float]:
+    """Return a function converting the sensor's unit to degrees Celsius.
+
+    Raises:
+        RecorderError: If the entity has no statistics or its unit is
+            neither °C nor °F.
+    """
+    unit = _resolve_unit(conn, entity.entity_id, entity.unit)
+    if unit == "°C":
+        return float
+    if unit == "°F":
+        return lambda value: (float(value) - 32.0) * 5.0 / 9.0
+    raise RecorderError(f"Entity {entity.entity_id} has unit {unit!r}; °C or °F is required.")
+
+
+def check_entities(config: RecorderConfig) -> None:
+    """Verify every configured entity has long-term statistics in a supported unit.
+
+    Run at startup, so a misconfigured entity is reported before the first
+    trigger rather than only when a cycle runs.
+
+    Args:
+        config: Recorder connection and entity configuration.
+
+    Raises:
+        RecorderError: If the database cannot be read, or an entity is
+            missing or has an unsupported unit. The message names the entity
+            and is scrubbed of credentials.
+    """
+    engine = build_engine(config.db_url)
+    try:
+        with engine.connect() as conn:
+            for source in config.heat_sources:
+                _energy_factor(conn, source)
+            for entity in config.tank_temperature_entities:
+                _temperature_converter(conn, entity)
+    except SQLAlchemyError as exc:
+        message = _scrub(f"{type(exc).__name__}: {exc}", config.db_url)
+        raise RecorderError(
+            f"Recorder check failed on {redact_db_url(config.db_url)!r}: {message}"
+        ) from None
+    finally:
+        engine.dispose()
+
+
 def _read_energy(conn: Connection, source: HeatSourceConfig, start_ts: int, end_ts: int) -> dict[int, float]:
     """Return hourly kWh deltas of one heat source's energy counter.
 
@@ -309,13 +370,7 @@ def _read_energy(conn: Connection, source: HeatSourceConfig, start_ts: int, end_
     Raises:
         RecorderError: If the unit is not an energy unit.
     """
-    unit = _resolve_unit(conn, source.energy_entity, source.unit)
-    if unit not in _ENERGY_UNIT_TO_KWH:
-        raise RecorderError(
-            f"Entity {source.energy_entity} has unit {unit!r}; an energy unit "
-            f"({', '.join(_ENERGY_UNIT_TO_KWH)}) is required."
-        )
-    factor = _ENERGY_UNIT_TO_KWH[unit]
+    factor = _energy_factor(conn, source)
     rows = conn.execute(
         _SUM_QUERY,
         {"entity_id": source.energy_entity, "from_ts": start_ts - _HOUR_S, "end_ts": end_ts},
@@ -341,14 +396,7 @@ def _read_temperature(
     Raises:
         RecorderError: If the unit is neither degrees Celsius nor Fahrenheit.
     """
-    unit = _resolve_unit(conn, entity.entity_id, entity.unit)
-    if unit == "°C":
-        convert = float
-    elif unit == "°F":
-        def convert(value: float) -> float:
-            return (float(value) - 32.0) * 5.0 / 9.0
-    else:
-        raise RecorderError(f"Entity {entity.entity_id} has unit {unit!r}; °C or °F is required.")
+    convert = _temperature_converter(conn, entity)
     rows = conn.execute(
         _MEAN_QUERY, {"entity_id": entity.entity_id, "from_ts": start_ts, "end_ts": end_ts}
     ).fetchall()

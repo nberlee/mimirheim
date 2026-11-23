@@ -376,3 +376,27 @@ def test_misaligned_rows_are_not_treated_as_adjacent(tmp_path: Path) -> None:
     hist = fetch_history(_cfg(url), start_ts=T0, end_ts=T0 + 3 * H)
     assert hist.heat_kwh["sensor.e"] == {T0 + 2 * H: pytest.approx(1.5)}
     assert hist.tank_temp_c["sensor.t"] == {T0 + H: 51.0}
+
+
+class TestEligibility:
+    def test_eligible_entities_pass(self, tmp_path: Path) -> None:
+        from hot_water_draw.recorder import check_entities
+
+        url = _make_db(tmp_path, [(1, "sensor.e", "kWh"), (2, "sensor.t", "°C")], [])
+        check_entities(_cfg(url))
+
+    @pytest.mark.parametrize(
+        "meta,match",
+        [
+            ([(2, "sensor.t", "°C")], "sensor.e"),
+            ([(1, "sensor.e", "kWh")], "sensor.t"),
+            ([(1, "sensor.e", "W"), (2, "sensor.t", "°C")], "sensor.e"),
+            ([(1, "sensor.e", "kWh"), (2, "sensor.t", "%")], "sensor.t"),
+        ],
+    )
+    def test_missing_or_wrong_unit_entities_fail(self, tmp_path: Path, meta: list, match: str) -> None:
+        from hot_water_draw.recorder import check_entities
+
+        url = _make_db(tmp_path, meta, [])
+        with pytest.raises(RecorderError, match=match):
+            check_entities(_cfg(url))
