@@ -192,6 +192,7 @@ testpaths = [
     "mimirheim_helpers/reporter/tests",
     "mimirheim_helpers/config_editor/tests",
     "mimirheim_shared/tests",
+    "scripts/dhw_benchmark/tests",
 ]
 markers = [
     "integration: marks tests that require a live MQTT broker (run with -m integration)",
